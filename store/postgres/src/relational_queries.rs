@@ -25,7 +25,7 @@ use graph::prelude::{
     QueryExecutionError, StoreError, Value,
 };
 use graph::{
-    components::store::EntityType,
+    components::store::{ColumnNames, EntityType},
     data::{schema::FulltextAlgorithm, store::scalar},
 };
 
@@ -1585,6 +1585,7 @@ impl<'a> FilterWindow<'a> {
             child_type,
             ids,
             link,
+            column_names,
         } = window;
         let table = layout.table_for_entity(&child_type).map(|rc| rc.as_ref())?;
         let query_filter = query_filter
@@ -1878,7 +1879,7 @@ impl<'a> FilterWindow<'a> {
 pub enum FilterCollection<'a> {
     /// Collection made from all entities in a table; each entry is the table
     /// and the filter to apply to it, checked and bound to that table
-    All(Vec<(&'a Table, Option<QueryFilter<'a>>)>),
+    All(Vec<(&'a Table, Option<QueryFilter<'a>>, ColumnNames)>),
     /// Collection made from windows of the same or different entity types
     SingleWindow(FilterWindow<'a>),
     MultiWindow(Vec<FilterWindow<'a>>, Vec<String>),
@@ -1898,7 +1899,7 @@ impl<'a> FilterCollection<'a> {
                 // to it
                 let entities = entities
                     .iter()
-                    .map(|entity| {
+                    .map(|(entity, column_names)| {
                         layout
                             .table_for_entity(&entity)
                             .map(|rc| rc.as_ref())
@@ -1906,7 +1907,7 @@ impl<'a> FilterCollection<'a> {
                                 filter
                                     .map(|filter| QueryFilter::new(filter, table))
                                     .transpose()
-                                    .map(|filter| (table, filter))
+                                    .map(|filter| (table, filter, column_names.clone()))
                             })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -2268,9 +2269,13 @@ impl<'a> FilterQuery<'a> {
         table: &Table,
         filter: &Option<QueryFilter>,
         mut out: AstPass<Pg>,
+        column_names: &ColumnNames,
     ) -> QueryResult<()> {
         Self::select_entity_and_data(table, &mut out);
-        out.push_sql(" from (select * ");
+
+        out.push_sql(" from (select ");
+        write_column_names(&column_names, &mut out);
+
         self.filtered_rows(table, filter, out.reborrow())?;
         out.push_sql("\n ");
         self.sort_key.order_by(&mut out)?;
@@ -2307,7 +2312,7 @@ impl<'a> FilterQuery<'a> {
     /// No windowing, but multiple entity types
     fn query_no_window(
         &self,
-        entities: &Vec<(&Table, Option<QueryFilter>)>,
+        entities: &Vec<(&Table, Option<QueryFilter>, ColumnNames)>,
         mut out: AstPass<Pg>,
     ) -> QueryResult<()> {
         // We have multiple tables which might have different schemas since
@@ -2327,6 +2332,7 @@ impl<'a> FilterQuery<'a> {
         //    ...
         //    order by {sort_key}
         //    limit n offset m)
+        //
         // select m.entity, to_jsonb(c.*) as data, c.id, c.{sort_key}
         //   from {table} c, matches m
         //  where c.vid = m.vid and m.entity = '...'
@@ -2336,7 +2342,7 @@ impl<'a> FilterQuery<'a> {
 
         // Step 1: build matches CTE
         out.push_sql("with matches as (");
-        for (i, (table, filter)) in entities.iter().enumerate() {
+        for (i, (table, filter, _column_names)) in entities.iter().enumerate() {
             if i > 0 {
                 out.push_sql("\nunion all\n");
             }
@@ -2357,11 +2363,13 @@ impl<'a> FilterQuery<'a> {
         out.push_sql(")\n");
 
         // Step 2: convert to JSONB
-        for (i, (table, _)) in entities.iter().enumerate() {
+        for (i, (table, _, column_names)) in entities.iter().enumerate() {
             if i > 0 {
                 out.push_sql("\nunion all\n");
             }
-            out.push_sql("select m.entity, to_jsonb(c.*) as data, c.id");
+            out.push_sql("select m.entity, ");
+            jsonb_build_object(column_names, "c", &mut out);
+            out.push_sql(" as data, c.id");
             self.sort_key.select(&mut out)?;
             out.push_sql("\n  from ");
             out.push_sql(table.qualified_name.as_str());
@@ -2479,10 +2487,10 @@ impl<'a> QueryFragment<Pg> for FilterQuery<'a> {
         match &self.collection {
             FilterCollection::All(entities) => {
                 if entities.len() == 1 {
-                    let (table, filter) = entities
+                    let (table, filter, column_names) = entities
                         .first()
                         .expect("a query always uses at least one table");
-                    self.query_no_window_one_entity(table, filter, out)
+                    self.query_no_window_one_entity(table, filter, out, column_names)
                 } else {
                     self.query_no_window(entities, out)
                 }
@@ -2854,4 +2862,49 @@ impl<'a, Conn> RunQueryDsl<Conn> for CopyEntityBatchQuery<'a> {}
 pub struct CopyVid {
     #[sql_type = "BigInt"]
     pub vid: i64,
+
+
+fn write_column_names(column_names: &ColumnNames, out: &mut AstPass<Pg>) {
+    match column_names {
+        ColumnNames::All => out.push_sql(" * "),
+        ColumnNames::Select(column_names) => {
+            let mut iterator = column_names.iter().peekable();
+            while let Some(column_name) = iterator.next() {
+                out.push_sql(column_name);
+                if iterator.peek().is_some() {
+                    out.push_sql(", ");
+                }
+            }
+        }
+    }
+
+}
+
+fn jsonb_build_object(column_names: &ColumnNames, table_identifier: &str, out: &mut AstPass<Pg>) {
+    dbg!(&column_names);
+    match column_names {
+        ColumnNames::All => {
+            out.push_sql(r#"to_jsonb(""#);
+            out.push_sql(table_identifier);
+            out.push_sql(r#"".*)"#);
+        }
+        ColumnNames::Select(column_names) => {
+            out.push_sql("jsonb_build_object(");
+            let mut iterator = column_names.iter().peekable();
+            while let Some(column_name) = iterator.next() {
+                // field name as json key
+                out.push_sql("'");
+                out.push_sql(column_name);
+                out.push_sql("', ");
+                // column identifier
+                out.push_sql(table_identifier);
+                out.push_sql(".");
+                out.push_sql(column_name);
+                if iterator.peek().is_some() {
+                    out.push_sql(", ");
+                }
+            }
+            out.push_sql(")");
+        }
+    }
 }

@@ -5,6 +5,7 @@ use graph::prelude::*;
 use graph::{components::store::EntityType, data::graphql::ObjectOrInterface};
 
 use crate::schema::ast as sast;
+use crate::store::prefetch::ObjectCondition;
 
 #[derive(Debug)]
 enum OrderDirection {
@@ -22,14 +23,19 @@ pub fn build_query<'a>(
     types_for_interface: &BTreeMap<EntityType, Vec<s::ObjectType>>,
     max_first: u32,
     max_skip: u32,
+    column_names: HashMap<ObjectCondition<'a>, ColumnNames>,
 ) -> Result<EntityQuery, QueryExecutionError> {
+    todo!("Finish implementing ColumnNames on this function.");
     let entity = entity.into();
     let entity_types = EntityCollection::All(match &entity {
-        ObjectOrInterface::Object(object) => vec![(*object).into()],
+        ObjectOrInterface::Object(object) => vec![((*object).into(), column_names)],
         ObjectOrInterface::Interface(interface) => types_for_interface
             [&EntityType::from(*interface)]
             .iter()
-            .map(|o| o.into())
+            .map(|o| {
+                todo!("scope column_names for this specific object type, instead of cloning it.");
+                (o.into(), column_names.clone())
+            })
             .collect(),
     });
     let mut query = EntityQuery::new(parse_subgraph_id(entity)?, block, entity_types)
@@ -458,7 +464,8 @@ mod tests {
                 &default_arguments(),
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -478,7 +485,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -494,7 +502,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -514,7 +523,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -530,7 +540,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -552,7 +563,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -569,7 +581,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -589,7 +602,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -609,7 +623,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -631,7 +646,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -648,7 +664,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .order,
@@ -665,7 +682,8 @@ mod tests {
                 &default_arguments(),
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .range,
@@ -685,7 +703,8 @@ mod tests {
                 &args,
                 &BTreeMap::new(),
                 std::u32::MAX,
-                std::u32::MAX
+                std::u32::MAX,
+                CollectedColumnNames::default(),
             )
             .unwrap()
             .range,
