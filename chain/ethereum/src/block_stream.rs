@@ -263,12 +263,12 @@ where
 
         trace!(
             ctx.logger, "Chain head pointer";
-            "hash" => format!("{:?}", head_ptr.hash),
+            "hash" => format!("{}", head_ptr.hash),
             "number" => &head_ptr.number
         );
         trace!(
             ctx.logger, "Subgraph pointer";
-            "hash" => format!("{:?}", subgraph_ptr.as_ref().map(|block| &block.hash)),
+            "hash" => format!("{:?}", subgraph_ptr.as_ref().map(|block| format!("{}", &block.hash))),
             "number" => subgraph_ptr.as_ref().map(|block| block.number),
         );
 
