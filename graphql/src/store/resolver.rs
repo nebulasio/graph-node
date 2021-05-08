@@ -21,8 +21,8 @@ pub struct StoreResolver {
     logger: Logger,
     pub(crate) store: Arc<dyn QueryStore>,
     subscription_manager: Arc<dyn SubscriptionManager>,
-    pub(crate) block_ptr: Option<EthereumBlockPointer>,
-    deployment: SubgraphDeploymentId,
+    pub(crate) block_ptr: Option<BlockPtr>,
+    deployment: DeploymentHash,
     has_non_fatal_errors: bool,
     error_policy: ErrorPolicy,
 }
@@ -36,7 +36,7 @@ impl StoreResolver {
     /// blocks
     pub fn for_subscription(
         logger: &Logger,
-        deployment: SubgraphDeploymentId,
+        deployment: DeploymentHash,
         store: Arc<dyn QueryStore>,
         subscription_manager: Arc<dyn SubscriptionManager>,
     ) -> Self {
@@ -64,7 +64,7 @@ impl StoreResolver {
         subscription_manager: Arc<dyn SubscriptionManager>,
         bc: BlockConstraint,
         error_policy: ErrorPolicy,
-        deployment: SubgraphDeploymentId,
+        deployment: DeploymentHash,
     ) -> Result<Self, QueryExecutionError> {
         let store_clone = store.cheap_clone();
         let deployment2 = deployment.clone();
@@ -101,8 +101,8 @@ impl StoreResolver {
     fn locate_block(
         store: &dyn QueryStore,
         bc: BlockConstraint,
-        subgraph: SubgraphDeploymentId,
-    ) -> Result<EthereumBlockPointer, QueryExecutionError> {
+        subgraph: DeploymentHash,
+    ) -> Result<BlockPtr, QueryExecutionError> {
         match bc {
             BlockConstraint::Number(number) => store
                 .block_ptr()
@@ -125,16 +125,13 @@ impl StoreResolver {
                         // always return an all zeroes hash when users specify
                         // a block number
                         // See 7a7b9708-adb7-4fc2-acec-88680cb07ec1
-                        Ok(EthereumBlockPointer::from((
-                            web3::types::H256::zero(),
-                            number as u64,
-                        )))
+                        Ok(BlockPtr::from((web3::types::H256::zero(), number as u64)))
                     }
                 }),
             BlockConstraint::Hash(hash) => {
                 store
                     .block_number(hash)
-                    .map_err(|e| e.into())
+                    .map_err(Into::into)
                     .and_then(|number| {
                         number
                             .ok_or_else(|| {
@@ -143,7 +140,7 @@ impl StoreResolver {
                                     "no block with that hash found".to_owned(),
                                 )
                             })
-                            .map(|number| EthereumBlockPointer::from((hash, number as u64)))
+                            .map(|number| BlockPtr::from((hash, number as u64)))
                     })
             }
             BlockConstraint::Latest => store
@@ -228,7 +225,7 @@ impl Resolver for StoreResolver {
         field: &q::Field,
         _field_definition: &s::Field,
         object_type: ObjectOrInterface<'_>,
-        _arguments: &HashMap<&String, q::Value>,
+        _arguments: &HashMap<&str, q::Value>,
     ) -> Result<q::Value, QueryExecutionError> {
         if let Some(child) = prefetched_objects {
             Ok(child)
@@ -248,7 +245,7 @@ impl Resolver for StoreResolver {
         field: &q::Field,
         field_definition: &s::Field,
         object_type: ObjectOrInterface<'_>,
-        _arguments: &HashMap<&String, q::Value>,
+        _arguments: &HashMap<&str, q::Value>,
     ) -> Result<q::Value, QueryExecutionError> {
         let (prefetched_object, meta) = self.handle_meta(prefetched_object, &object_type)?;
         if let Some(meta) = meta {

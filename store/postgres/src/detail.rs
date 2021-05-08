@@ -7,8 +7,8 @@ use graph::{
     constraint_violation,
     data::subgraph::schema::{SubgraphError, SubgraphManifestEntity},
     prelude::{
-        bigdecimal::ToPrimitive, BigDecimal, EthereumBlockPointer, StoreError,
-        SubgraphDeploymentEntity, SubgraphDeploymentId,
+        bigdecimal::ToPrimitive, BigDecimal, BlockPtr, DeploymentHash, StoreError,
+        SubgraphDeploymentEntity,
     },
 };
 use graph::{data::subgraph::status, prelude::web3::types::H256};
@@ -124,10 +124,10 @@ impl TryFrom<ErrorDetail> for SubgraphError {
         // has a hash. Conversely, it is also possible for an error to not have a
         // hash. In both cases, use a block pointer of `None`
         let block_ptr = match (block_number, block_hash) {
-            (Some(number), Some(hash)) => Some(EthereumBlockPointer::from((hash, number as u64))),
+            (Some(number), Some(hash)) => Some(BlockPtr::from((hash, number as u64))),
             _ => None,
         };
-        let subgraph_id = SubgraphDeploymentId::new(subgraph_id).map_err(|id| {
+        let subgraph_id = DeploymentHash::new(subgraph_id).map_err(|id| {
             StoreError::ConstraintViolation(format!("invalid subgraph id `{}` in fatal error", id))
         })?;
         Ok(SubgraphError {
@@ -321,7 +321,7 @@ impl TryFrom<StoredDeploymentEntity> for SubgraphDeploymentEntity {
 
         let graft_base = detail
             .graft_base
-            .map(|b| SubgraphDeploymentId::new(b))
+            .map(|b| DeploymentHash::new(b))
             .transpose()
             .map_err(|b| constraint_violation!("invalid graft base `{}`", b))?;
 

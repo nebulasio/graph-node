@@ -7,7 +7,7 @@ use std::sync::Arc;
 use graph::prelude::{anyhow::anyhow, anyhow::Error};
 use graph::prelude::{BlockNumber, QueryStoreManager};
 use graph::{cheap_clone::CheapClone, prelude::web3::types::H160};
-use graph::{components::store::BlockStore as _, prelude::SubgraphDeploymentId};
+use graph::{components::store::BlockStore as _, prelude::DeploymentHash};
 use graph::{components::store::ChainStore as _, prelude::EthereumCallCache as _};
 use graph_store_postgres::Store as DieselStore;
 use graph_store_postgres::{layout_for_tests::FAKE_NETWORK_SHARED, ChainStore as DieselChainStore};
@@ -73,9 +73,11 @@ fn check_chain_head_update(
     head_exp: Option<&'static FakeBlock>,
     missing: Option<&'static str>,
 ) {
-    run_test(chain, move |store, _| {
+    run_test_async(chain, move |store, _| async move {
         let missing_act: Vec<_> = store
+            .clone()
             .attempt_chain_head_update(ANCESTOR_COUNT)
+            .await
             .expect("attempt_chain_head_update failed")
             .iter()
             .map(|h| format!("{:x}", h))
@@ -89,7 +91,6 @@ fn check_chain_head_update(
             .expect("chain_head_ptr failed")
             .map(|ebp| ebp.hash_hex());
         assert_eq!(head_hash_exp, head_hash_act);
-        Ok(())
     })
 }
 
@@ -169,7 +170,7 @@ fn long_chain_with_uncles() {
 #[test]
 fn block_number() {
     let chain = vec![&*GENESIS_BLOCK, &*BLOCK_ONE, &*BLOCK_TWO];
-    let subgraph = SubgraphDeploymentId::new("nonExistentSubgraph").unwrap();
+    let subgraph = DeploymentHash::new("nonExistentSubgraph").unwrap();
 
     run_test_async(chain, move |_, subgraph_store| {
         let subgraph = subgraph.cheap_clone();

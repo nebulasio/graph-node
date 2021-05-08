@@ -61,29 +61,29 @@ lazy_static! {
     pub static ref NODE_ID: NodeId = NodeId::new("test").unwrap();
     static ref SUBGRAPH_STORE: Arc<DieselSubgraphStore> = STORE.subgraph_store();
     static ref BLOCK_STORE: Arc<DieselBlcokStore> = STORE.block_store();
-    pub static ref GENESIS_PTR: EthereumBlockPointer = (
+    pub static ref GENESIS_PTR: BlockPtr = (
         H256::from(hex!(
             "bd34884280958002c51d3f7b5f853e6febeba33de0f40d15b0363006533c924f"
         )),
         0u64
     )
         .into();
-    pub static ref BLOCK_ONE: EthereumBlockPointer = (
+    pub static ref BLOCK_ONE: BlockPtr = (
         H256::from(hex!(
             "8511fa04b64657581e3f00e14543c1d522d5d7e771b54aa3060b662ade47da13"
         )),
         1u64
     )
         .into();
-    pub static ref BLOCKS: [EthereumBlockPointer; 4] = {
-        let two: EthereumBlockPointer = (
+    pub static ref BLOCKS: [BlockPtr; 4] = {
+        let two: BlockPtr = (
             H256::from(hex!(
                 "b98fb783b49de5652097a989414c767824dff7e7fd765a63b493772511db81c1"
             )),
             2u64,
         )
             .into();
-        let three: EthereumBlockPointer = (
+        let three: BlockPtr = (
             H256::from(hex!(
                 "977c084229c72a0fa377cae304eda9099b6a2cb5d83b25cdf0f0969b69874255"
             )),
@@ -146,9 +146,9 @@ pub fn place(name: &str) -> Result<Option<(Shard, Vec<NodeId>)>, String> {
 }
 
 pub fn create_subgraph(
-    subgraph_id: &SubgraphDeploymentId,
+    subgraph_id: &DeploymentHash,
     schema: &str,
-    base: Option<(SubgraphDeploymentId, EthereumBlockPointer)>,
+    base: Option<(DeploymentHash, BlockPtr)>,
 ) -> Result<DeploymentLocator, StoreError> {
     let schema = Schema::parse(schema, subgraph_id.clone()).unwrap();
 
@@ -184,11 +184,11 @@ pub fn create_subgraph(
     Ok(deployment)
 }
 
-pub fn create_test_subgraph(subgraph_id: &SubgraphDeploymentId, schema: &str) -> DeploymentLocator {
+pub fn create_test_subgraph(subgraph_id: &DeploymentHash, schema: &str) -> DeploymentLocator {
     create_subgraph(subgraph_id, schema, None).unwrap()
 }
 
-pub fn remove_subgraph(id: &SubgraphDeploymentId) {
+pub fn remove_subgraph(id: &DeploymentHash) {
     let name = {
         let mut name = id.to_string();
         name.truncate(32);
@@ -203,7 +203,7 @@ pub fn remove_subgraph(id: &SubgraphDeploymentId) {
 pub fn transact_errors(
     store: &Arc<Store>,
     deployment: &DeploymentLocator,
-    block_ptr_to: EthereumBlockPointer,
+    block_ptr_to: BlockPtr,
     errs: Vec<SubgraphError>,
 ) -> Result<(), StoreError> {
     let metrics_registry = Arc::new(MockMetricsRegistry::new());
@@ -228,7 +228,7 @@ pub fn transact_errors(
 pub fn transact_entity_operations(
     store: &Arc<DieselSubgraphStore>,
     deployment: &DeploymentLocator,
-    block_ptr_to: EthereumBlockPointer,
+    block_ptr_to: BlockPtr,
     ops: Vec<EntityOperation>,
 ) -> Result<(), StoreError> {
     transact_entities_and_dynamic_data_sources(store, deployment.clone(), block_ptr_to, vec![], ops)
@@ -237,7 +237,7 @@ pub fn transact_entity_operations(
 pub fn transact_entities_and_dynamic_data_sources(
     store: &Arc<DieselSubgraphStore>,
     deployment: DeploymentLocator,
-    block_ptr_to: EthereumBlockPointer,
+    block_ptr_to: BlockPtr,
     data_sources: Vec<&DataSource>,
     ops: Vec<EntityOperation>,
 ) -> Result<(), StoreError> {
@@ -256,7 +256,7 @@ pub fn transact_entities_and_dynamic_data_sources(
     );
     let data_sources = data_sources
         .into_iter()
-        .map(|ds| StoredDynamicDataSource::from(ds))
+        .map(StoredDynamicDataSource::from)
         .collect();
     store.transact_block_operations(
         block_ptr_to,
@@ -267,11 +267,7 @@ pub fn transact_entities_and_dynamic_data_sources(
     )
 }
 
-pub fn revert_block(
-    store: &Arc<Store>,
-    deployment: &DeploymentLocator,
-    ptr: &EthereumBlockPointer,
-) {
+pub fn revert_block(store: &Arc<Store>, deployment: &DeploymentLocator, ptr: &BlockPtr) {
     store
         .subgraph_store()
         .writable(deployment)
@@ -304,7 +300,7 @@ pub fn insert_entities(
             key: EntityKey {
                 subgraph_id: deployment.hash.clone(),
                 entity_type: entity_type.to_owned(),
-                entity_id: data["id"].clone().as_string().unwrap(),
+                entity_id: data.get("id").unwrap().clone().as_string().unwrap(),
             },
             data,
         });
@@ -434,10 +430,7 @@ fn execute_subgraph_query_internal(
     result
 }
 
-pub async fn deployment_state(
-    store: &Store,
-    subgraph_id: &SubgraphDeploymentId,
-) -> DeploymentState {
+pub async fn deployment_state(store: &Store, subgraph_id: &DeploymentHash) -> DeploymentState {
     store
         .query_store(QueryTarget::Deployment(subgraph_id.to_owned()), false)
         .await

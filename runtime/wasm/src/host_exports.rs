@@ -67,7 +67,7 @@ impl IntoTrap for HostExportError {
 }
 
 pub(crate) struct HostExports {
-    pub(crate) subgraph_id: SubgraphDeploymentId,
+    pub(crate) subgraph_id: DeploymentHash,
     pub(crate) api_version: Version,
     data_source_name: String,
     data_source_address: Option<Address>,
@@ -97,7 +97,7 @@ impl std::fmt::Debug for HostExports {
 
 impl HostExports {
     pub(crate) fn new(
-        subgraph_id: SubgraphDeploymentId,
+        subgraph_id: DeploymentHash,
         data_source: &DataSource,
         data_source_network: String,
         templates: Arc<Vec<DataSourceTemplate>>,
@@ -800,8 +800,8 @@ pub(crate) fn bytes_to_string(logger: &Logger, bytes: Vec<u8>) -> String {
             logger,
             "Bytes contain invalid UTF8. This may be caused by attempting \
             to convert a value such as an address that cannot be parsed to a unicode string. \
-            You may want to use 'toHexString()' instead. String: '{}'",
-            s,
+            You may want to use 'toHexString()' instead. String (truncated to 1024 chars): '{}'",
+            &s[..s.len().min(1024)],
         )
     }
 

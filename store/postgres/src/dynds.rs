@@ -14,8 +14,8 @@ use graph::{
     constraint_violation,
     data::subgraph::Source,
     prelude::{
-        bigdecimal::ToPrimitive, web3::types::H160, BigDecimal, BlockNumber, EthereumBlockPointer,
-        StoreError, SubgraphDeploymentId,
+        bigdecimal::ToPrimitive, web3::types::H160, BigDecimal, BlockNumber, BlockPtr,
+        DeploymentHash, StoreError,
     },
 };
 
@@ -112,9 +112,9 @@ pub fn load(conn: &PgConnection, id: &str) -> Result<Vec<StoredDynamicDataSource
 
 pub(crate) fn insert(
     conn: &PgConnection,
-    deployment: &SubgraphDeploymentId,
+    deployment: &DeploymentHash,
     data_sources: Vec<StoredDynamicDataSource>,
-    block_ptr: &EthereumBlockPointer,
+    block_ptr: &BlockPtr,
 ) -> Result<usize, StoreError> {
     use dynamic_ethereum_contract_data_source as decds;
 
@@ -166,7 +166,7 @@ pub(crate) fn copy(
     conn: &PgConnection,
     src: &Site,
     dst: &Site,
-    target_block: &EthereumBlockPointer,
+    target_block: &BlockPtr,
 ) -> Result<usize, StoreError> {
     use dynamic_ethereum_contract_data_source as decds;
 
@@ -209,7 +209,7 @@ pub(crate) fn copy(
 
 pub(crate) fn revert(
     conn: &PgConnection,
-    id: &SubgraphDeploymentId,
+    id: &DeploymentHash,
     block: BlockNumber,
 ) -> Result<(), StoreError> {
     use dynamic_ethereum_contract_data_source as decds;
@@ -219,7 +219,7 @@ pub(crate) fn revert(
     Ok(())
 }
 
-pub(crate) fn drop(conn: &PgConnection, id: &SubgraphDeploymentId) -> Result<usize, StoreError> {
+pub(crate) fn drop(conn: &PgConnection, id: &DeploymentHash) -> Result<usize, StoreError> {
     use dynamic_ethereum_contract_data_source as decds;
 
     delete(decds::table.filter(decds::deployment.eq(id.as_str())))

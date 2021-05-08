@@ -57,60 +57,60 @@ const USER: &str = "User";
 
 lazy_static! {
     static ref TEST_SUBGRAPH_ID_STRING: String = String::from("testsubgraph");
-    static ref TEST_SUBGRAPH_ID: SubgraphDeploymentId =
-        SubgraphDeploymentId::new(TEST_SUBGRAPH_ID_STRING.as_str()).unwrap();
+    static ref TEST_SUBGRAPH_ID: DeploymentHash =
+        DeploymentHash::new(TEST_SUBGRAPH_ID_STRING.as_str()).unwrap();
     static ref TEST_SUBGRAPH_SCHEMA: Schema =
         Schema::parse(USER_GQL, TEST_SUBGRAPH_ID.clone()).expect("Failed to parse user schema");
-    static ref TEST_BLOCK_0_PTR: EthereumBlockPointer = (
+    static ref TEST_BLOCK_0_PTR: BlockPtr = (
         H256::from(hex!(
             "bd34884280958002c51d3f7b5f853e6febeba33de0f40d15b0363006533c924f"
         )),
         0u64
     )
         .into();
-    static ref TEST_BLOCK_1_PTR: EthereumBlockPointer = (
+    static ref TEST_BLOCK_1_PTR: BlockPtr = (
         H256::from(hex!(
             "8511fa04b64657581e3f00e14543c1d522d5d7e771b54aa3060b662ade47da13"
         )),
         1u64
     )
         .into();
-    static ref TEST_BLOCK_2_PTR: EthereumBlockPointer = (
+    static ref TEST_BLOCK_2_PTR: BlockPtr = (
         H256::from(hex!(
             "b98fb783b49de5652097a989414c767824dff7e7fd765a63b493772511db81c1"
         )),
         2u64
     )
         .into();
-    static ref TEST_BLOCK_3_PTR: EthereumBlockPointer = (
+    static ref TEST_BLOCK_3_PTR: BlockPtr = (
         H256::from(hex!(
             "977c084229c72a0fa377cae304eda9099b6a2cb5d83b25cdf0f0969b69874255"
         )),
         3u64
     )
         .into();
-    static ref TEST_BLOCK_3A_PTR: EthereumBlockPointer = (
+    static ref TEST_BLOCK_3A_PTR: BlockPtr = (
         H256::from(hex!(
             "d163aec0592c7cb00c2700ab65dcaac93289f5d250b3b889b39198b07e1fbe4a"
         )),
         3u64
     )
         .into();
-    static ref TEST_BLOCK_4_PTR: EthereumBlockPointer = (
+    static ref TEST_BLOCK_4_PTR: BlockPtr = (
         H256::from(hex!(
             "007a03cdf635ebb66f5e79ae66cc90ca23d98031665649db056ff9c6aac2d74d"
         )),
         4u64
     )
         .into();
-    static ref TEST_BLOCK_4A_PTR: EthereumBlockPointer = (
+    static ref TEST_BLOCK_4A_PTR: BlockPtr = (
         H256::from(hex!(
             "8fab27e9e9285b0a39110f4d9877f05d0f43d2effa157e55f4dcc49c3cf8cbd7"
         )),
         4u64
     )
         .into();
-    static ref TEST_BLOCK_5_PTR: EthereumBlockPointer = (
+    static ref TEST_BLOCK_5_PTR: BlockPtr = (
         H256::from(hex!(
             "e8b3b02b936c4a4a331ac691ac9a86e197fb7731f14e3108602c87d4dac55160"
         )),
@@ -293,7 +293,7 @@ fn remove_test_data(store: Arc<DieselSubgraphStore>) {
         .expect("deleting test entities succeeds");
 }
 
-fn get_entity_count(store: Arc<DieselStore>, subgraph_id: &SubgraphDeploymentId) -> u64 {
+fn get_entity_count(store: Arc<DieselStore>, subgraph_id: &DeploymentHash) -> u64 {
     let info = store
         .status(status::Filter::Deployments(vec![subgraph_id.to_string()]))
         .unwrap();
@@ -967,7 +967,7 @@ async fn check_events(
 
 // Subscribe to store events
 fn subscribe(
-    subgraph: &SubgraphDeploymentId,
+    subgraph: &DeploymentHash,
     entity_type: &str,
 ) -> StoreEventStream<impl Stream<Item = Arc<StoreEvent>, Error = ()> + Send> {
     let subscription = SUBSCRIPTION_MANAGER.subscribe(vec![SubscriptionFilter::Entities(
@@ -1257,7 +1257,7 @@ fn revert_block_with_dynamic_data_source_operations() {
             tag: 3,
             changes: HashSet::from_iter(
                 vec![EntityChange::Data {
-                    subgraph_id: SubgraphDeploymentId::new("testsubgraph").unwrap(),
+                    subgraph_id: DeploymentHash::new("testsubgraph").unwrap(),
                     entity_type: EntityType::new(USER.into()),
                 }]
                 .into_iter(),
@@ -1270,7 +1270,7 @@ fn revert_block_with_dynamic_data_source_operations() {
 #[test]
 fn entity_changes_are_fired_and_forwarded_to_subscriptions() {
     run_test(|store, _, _| async move {
-        let subgraph_id = SubgraphDeploymentId::new("EntityChangeTestSubgraph").unwrap();
+        let subgraph_id = DeploymentHash::new("EntityChangeTestSubgraph").unwrap();
         let schema =
             Schema::parse(USER_GQL, subgraph_id.clone()).expect("Failed to parse user schema");
         let manifest = SubgraphManifest {
@@ -1861,7 +1861,7 @@ fn cleanup_cached_blocks() {
         let cleaned = chain_store
             .cleanup_cached_blocks(10)
             .expect("cleanup succeeds");
-        assert_eq!((2, 1), cleaned);
+        assert_eq!(Some((2, 1)), cleaned);
     })
 }
 
@@ -1871,7 +1871,7 @@ fn reorg_tracking() {
         store: &Arc<DieselSubgraphStore>,
         deployment: &DeploymentLocator,
         age: i32,
-        block: &EthereumBlockPointer,
+        block: &BlockPtr,
     ) {
         let test_entity_1 = create_test_entity(
             "1",

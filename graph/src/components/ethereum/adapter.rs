@@ -14,8 +14,11 @@ use tiny_keccak::keccak256;
 use web3::types::{Address, Block, Log, H2048, H256};
 
 use super::types::*;
-use crate::components::metrics::{labels, CounterVec, GaugeVec, HistogramVec};
 use crate::prelude::*;
+use crate::{
+    blockchain::IngestorError,
+    components::metrics::{labels, CounterVec, GaugeVec, HistogramVec},
+};
 
 pub type EventSignature = H256;
 
@@ -47,7 +50,7 @@ pub struct EthereumContractState {
 #[derive(Clone, Debug)]
 pub struct EthereumContractCall {
     pub address: Address,
-    pub block_ptr: EthereumBlockPointer,
+    pub block_ptr: BlockPtr,
     pub function: Function,
     pub args: Vec<Token>,
 }
@@ -72,24 +75,6 @@ pub enum EthereumContractCallError {
 impl From<ABIError> for EthereumContractCallError {
     fn from(e: ABIError) -> Self {
         EthereumContractCallError::ABIError(e)
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum EthereumAdapterError {
-    /// The Ethereum node does not know about this block for some reason, probably because it
-    /// disappeared in a chain reorg.
-    #[error("Block data unavailable, block was likely uncled (block hash = {0:?})")]
-    BlockUnavailable(H256),
-
-    /// An unexpected error occurred.
-    #[error("Ethereum adapter error: {0}")]
-    Unknown(Error),
-}
-
-impl From<Error> for EthereumAdapterError {
-    fn from(e: Error) -> Self {
-        EthereumAdapterError::Unknown(e)
     }
 }
 
@@ -562,7 +547,7 @@ impl BlockStreamMetrics {
     pub fn new(
         registry: Arc<impl MetricsRegistry>,
         ethrpc_metrics: Arc<SubgraphEthRpcMetrics>,
-        deployment_id: &SubgraphDeploymentId,
+        deployment_id: &DeploymentHash,
         network: String,
         stopwatch: StopwatchMetrics,
     ) -> Self {
@@ -610,13 +595,13 @@ pub trait EthereumAdapter: Send + Sync + 'static {
     fn latest_block(
         &self,
         logger: &Logger,
-    ) -> Box<dyn Future<Item = LightEthereumBlock, Error = EthereumAdapterError> + Send + Unpin>;
+    ) -> Box<dyn Future<Item = LightEthereumBlock, Error = IngestorError> + Send + Unpin>;
 
     /// Get the latest block, with only the header and transaction hashes.
     fn latest_block_header(
         &self,
         logger: &Logger,
-    ) -> Box<dyn Future<Item = web3::types::Block<H256>, Error = EthereumAdapterError> + Send>;
+    ) -> Box<dyn Future<Item = web3::types::Block<H256>, Error = IngestorError> + Send>;
 
     fn load_block(
         &self,
@@ -639,7 +624,7 @@ pub trait EthereumAdapter: Send + Sync + 'static {
         logger: Logger,
         from: BlockNumber,
         to: BlockNumber,
-    ) -> Box<dyn Future<Item = Vec<EthereumBlockPointer>, Error = Error> + Send>;
+    ) -> Box<dyn Future<Item = Vec<BlockPtr>, Error = Error> + Send>;
 
     /// Find a block by its hash.
     fn block_by_hash(
@@ -659,7 +644,7 @@ pub trait EthereumAdapter: Send + Sync + 'static {
         &self,
         logger: &Logger,
         block: LightEthereumBlock,
-    ) -> Box<dyn Future<Item = EthereumBlock, Error = EthereumAdapterError> + Send>;
+    ) -> Box<dyn Future<Item = EthereumBlock, Error = IngestorError> + Send>;
 
     /// Load block pointer for the specified `block number`.
     fn block_pointer_from_number(
@@ -667,7 +652,7 @@ pub trait EthereumAdapter: Send + Sync + 'static {
         logger: &Logger,
         chain_store: Arc<dyn ChainStore>,
         block_number: BlockNumber,
-    ) -> Box<dyn Future<Item = EthereumBlockPointer, Error = EthereumAdapterError> + Send>;
+    ) -> Box<dyn Future<Item = BlockPtr, Error = IngestorError> + Send>;
 
     /// Find a block by its number. The `block_is_final` flag indicates whether
     /// it is ok to remove blocks in the block cache with that number but with
@@ -713,7 +698,7 @@ pub trait EthereumAdapter: Send + Sync + 'static {
         logger: &Logger,
         metrics: Arc<SubgraphEthRpcMetrics>,
         chain_store: Arc<dyn ChainStore>,
-        block_ptr: EthereumBlockPointer,
+        block_ptr: BlockPtr,
     ) -> Box<dyn Future<Item = bool, Error = Error> + Send>;
 
     fn calls_in_block(
@@ -785,7 +770,7 @@ fn parse_block_triggers(
     block_filter: EthereumBlockFilter,
     block: &EthereumBlockWithCalls,
 ) -> Vec<EthereumTrigger> {
-    let block_ptr = EthereumBlockPointer::from(&block.ethereum_block);
+    let block_ptr = BlockPtr::from(&block.ethereum_block);
     let trigger_every_block = block_filter.trigger_every_block;
     let call_filter = EthereumCallFilter::from(block_filter);
     let block_ptr2 = block_ptr.cheap_clone();
@@ -927,7 +912,7 @@ pub async fn blocks_with_triggers(
             eth.calls_in_block_range(&logger, subgraph_metrics.clone(), from, to, call_filter)
                 .map(|call| {
                     EthereumTrigger::Block(
-                        EthereumBlockPointer::from(&call),
+                        BlockPtr::from(&call),
                         EthereumBlockTriggerType::WithCallTo(call.to),
                     )
                 })

@@ -10,6 +10,8 @@ use std::{collections::HashMap, env};
 use structopt::StructOpt;
 use tokio::sync::mpsc;
 
+use graph::blockchain::block_ingestor::BlockIngestor;
+use graph::blockchain::Blockchain as _;
 use graph::components::{
     ethereum::{EthereumNetworks, NodeCapabilities},
     store::BlockStore,
@@ -19,7 +21,7 @@ use graph::log::logger;
 use graph::prelude::{IndexNodeServer as _, JsonRpcServer as _, *};
 use graph::util::security::SafeDisplay;
 use graph_chain_arweave::adapter::ArweaveAdapter;
-use graph_chain_ethereum::{network_indexer, BlockIngestor, BlockStreamBuilder, Transport};
+use graph_chain_ethereum::{self as ethereum, network_indexer, BlockStreamBuilder, Transport};
 use graph_core::{
     three_box::ThreeBoxAdapter, LinkResolver, MetricsRegistry,
     SubgraphAssignmentProvider as IpfsSubgraphAssignmentProvider, SubgraphInstanceManager,
@@ -382,7 +384,7 @@ async fn main() {
             let name = SubgraphName::new(name)
                 .expect("Subgraph name must contain only a-z, A-Z, 0-9, '-' and '_'");
             let subgraph_id =
-                SubgraphDeploymentId::new(hash).expect("Subgraph hash must be a valid IPFS hash");
+                DeploymentHash::new(hash).expect("Subgraph hash must be a valid IPFS hash");
 
             graph::spawn(
                 async move {
@@ -719,12 +721,22 @@ fn start_block_ingestor(
                 "network_name" => &network_name
             );
             let eth_adapter = eth_adapters.cheapest().unwrap(); //Safe to unwrap since it cannot be empty
-            let block_ingestor = BlockIngestor::new(
-                chain_store,
-                eth_adapter.clone(),
+            let chain_logger = logger_factory.component_logger(
+                "BlockIngestor",
+                Some(ComponentLoggerConfig {
+                    elastic: Some(ElasticComponentLoggerConfig {
+                        index: String::from("block-ingestor-logs"),
+                    }),
+                }),
+            )
+            .new(o!("provider" => eth_adapter.provider().to_string()));
+
+            let chain = ethereum::Chain::new(chain_logger.clone(), chain_store, eth_adapter.clone(), *ANCESTOR_COUNT);
+
+            let block_ingestor = BlockIngestor::<ethereum::Chain>::new(
+                chain_logger,
+                chain.ingestor_adapter(),
                 *ANCESTOR_COUNT,
-                network_name.to_string(),
-                logger_factory,
                 block_polling_interval,
             )
             .expect("failed to create Ethereum block ingestor");

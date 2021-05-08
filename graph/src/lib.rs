@@ -18,6 +18,8 @@ pub mod cheap_clone;
 
 pub mod ipfs_client;
 
+pub mod blockchain;
+
 pub mod runtime;
 
 /// Module with mocks for different parts of the system.
@@ -68,6 +70,7 @@ pub mod prelude {
     pub use reqwest;
     pub use serde_derive::{Deserialize, Serialize};
     pub use serde_json;
+    pub use serde_yaml;
     pub use slog::{self, crit, debug, error, info, o, trace, warn, Logger};
     pub use std::convert::TryFrom;
     pub use std::fmt::Debug;
@@ -84,14 +87,13 @@ pub mod prelude {
         Pin<Box<dyn futures03::Future<Output = Result<Ok, Err>> + Send + 'a>>;
 
     pub use crate::components::ethereum::{
-        BlockFinality, BlockStream, BlockStreamBuilder, BlockStreamEvent, BlockStreamMetrics,
-        ChainHeadUpdate, ChainHeadUpdateStream, EthereumAdapter, EthereumAdapterError,
-        EthereumBlock, EthereumBlockData, EthereumBlockFilter, EthereumBlockPointer,
-        EthereumBlockTriggerType, EthereumBlockWithCalls, EthereumBlockWithTriggers, EthereumCall,
-        EthereumCallData, EthereumCallFilter, EthereumContractCall, EthereumContractCallError,
-        EthereumEventData, EthereumLogFilter, EthereumNetworkIdentifier, EthereumTransactionData,
-        EthereumTrigger, LightEthereumBlock, LightEthereumBlockExt, MappingTrigger,
-        ProviderEthRpcMetrics, SubgraphEthRpcMetrics,
+        BlockFinality, BlockPtr, BlockStream, BlockStreamBuilder, BlockStreamEvent,
+        BlockStreamMetrics, ChainHeadUpdate, ChainHeadUpdateStream, EthereumAdapter, EthereumBlock,
+        EthereumBlockData, EthereumBlockFilter, EthereumBlockTriggerType, EthereumBlockWithCalls,
+        EthereumBlockWithTriggers, EthereumCall, EthereumCallData, EthereumCallFilter,
+        EthereumContractCall, EthereumContractCallError, EthereumEventData, EthereumLogFilter,
+        EthereumNetworkIdentifier, EthereumTransactionData, EthereumTrigger, LightEthereumBlock,
+        LightEthereumBlockExt, MappingTrigger, ProviderEthRpcMetrics, SubgraphEthRpcMetrics,
     };
     pub use crate::components::graphql::{
         GraphQlRunner, QueryLoadManager, SubscriptionResultFuture,
@@ -139,11 +141,10 @@ pub mod prelude {
     pub use crate::data::subgraph::schema::SubgraphDeploymentEntity;
     pub use crate::data::subgraph::{
         BlockHandlerFilter, CreateSubgraphResult, DataSource, DataSourceContext,
-        DataSourceTemplate, DeploymentState, Link, MappingABI, MappingBlockHandler,
-        MappingCallHandler, MappingEventHandler, SubgraphAssignmentProviderError,
-        SubgraphDeploymentId, SubgraphManifest, SubgraphManifestResolveError,
-        SubgraphManifestValidationError, SubgraphName, SubgraphRegistrarError,
-        UnvalidatedSubgraphManifest,
+        DataSourceTemplate, DeploymentHash, DeploymentState, Link, MappingABI, MappingBlockHandler,
+        MappingCallHandler, MappingEventHandler, SubgraphAssignmentProviderError, SubgraphManifest,
+        SubgraphManifestResolveError, SubgraphManifestValidationError, SubgraphName,
+        SubgraphRegistrarError, UnvalidatedSubgraphManifest,
     };
     pub use crate::data::subscription::{
         QueryResultStream, Subscription, SubscriptionError, SubscriptionResult,

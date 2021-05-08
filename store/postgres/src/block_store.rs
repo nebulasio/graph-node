@@ -6,7 +6,7 @@ use std::{
 
 use graph::{
     components::store::BlockStore as BlockStoreTrait,
-    prelude::{error, warn, BlockNumber, EthereumBlockPointer, EthereumNetworkIdentifier, Logger},
+    prelude::{error, warn, BlockNumber, BlockPtr, EthereumNetworkIdentifier, Logger},
 };
 use graph::{components::store::CallCache as CallCacheTrait, prelude::StoreError};
 use graph::{
@@ -347,7 +347,7 @@ impl BlockStore {
         Ok(store)
     }
 
-    pub fn chain_head_pointers(&self) -> Result<HashMap<String, EthereumBlockPointer>, StoreError> {
+    pub fn chain_head_pointers(&self) -> Result<HashMap<String, BlockPtr>, StoreError> {
         let mut map = HashMap::new();
         let stores = self
             .stores
@@ -384,7 +384,7 @@ impl BlockStore {
             .read()
             .unwrap()
             .get(chain)
-            .map(|store| store.cheap_clone());
+            .map(CheapClone::cheap_clone);
         if store.is_some() {
             return store;
         }

@@ -2,7 +2,7 @@ use crate::{
     components::store::{DeploymentLocator, EntityType},
     prelude::{q, s, CacheWeight, EntityKey, QueryExecutionError},
 };
-use crate::{data::subgraph::SubgraphDeploymentId, prelude::EntityChange};
+use crate::{data::subgraph::DeploymentHash, prelude::EntityChange};
 use anyhow::{anyhow, Error};
 use serde::de;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter::FromIterator;
-use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 use strum::AsStaticRef as _;
 use strum_macros::AsStaticStr;
@@ -26,7 +25,7 @@ pub mod ethereum;
 pub enum SubscriptionFilter {
     /// Receive updates about all entities from the given deployment of the
     /// given type
-    Entities(SubgraphDeploymentId, EntityType),
+    Entities(DeploymentHash, EntityType),
     /// Subscripe to changes in deployment assignments
     Assignment,
 }
@@ -262,10 +261,7 @@ impl Value {
     }
 
     pub fn is_string(&self) -> bool {
-        match self {
-            Value::String(_) => true,
-            _ => false,
-        }
+        matches!(self, Value::String(_))
     }
 
     pub fn as_int(self) -> Option<i32> {
@@ -352,7 +348,7 @@ impl fmt::Display for Value {
                     "[{}]",
                     values
                         .into_iter()
-                        .map(|value| format!("{}", value))
+                        .map(ToString::to_string)
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
@@ -439,7 +435,7 @@ impl TryFrom<Value> for Option<scalar::BigInt> {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
-            Value::BigInt(n) => Ok(Some(n.clone())),
+            Value::BigInt(n) => Ok(Some(n)),
             Value::Null => Ok(None),
             _ => Err(anyhow!("Value is not an BigInt")),
         }
@@ -503,6 +499,29 @@ impl Entity {
         Default::default()
     }
 
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.0.get(key)
+    }
+
+    pub fn insert(&mut self, key: String, value: Value) -> Option<Value> {
+        self.0.insert(key, value)
+    }
+
+    pub fn remove(&mut self, key: &str) -> Option<Value> {
+        self.0.remove(key)
+    }
+
+    pub fn contains_key(&mut self, key: &str) -> bool {
+        self.0.contains_key(key)
+    }
+
+    // This collects the entity into an ordered vector so that it can be iterated deterministically.
+    pub fn sorted(self) -> Vec<(String, Value)> {
+        let mut v: Vec<_> = self.0.into_iter().collect();
+        v.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+        v
+    }
+
     /// Try to get this entity's ID
     pub fn id(&self) -> Result<String, Error> {
         match self.get("id") {
@@ -514,7 +533,7 @@ impl Entity {
 
     /// Convenience method to save having to `.into()` the arguments.
     pub fn set(&mut self, name: impl Into<Attribute>, value: impl Into<Value>) -> Option<Value> {
-        self.insert(name.into(), value.into())
+        self.0.insert(name.into(), value.into())
     }
 
     /// Merges an entity update `update` into this entity.
@@ -540,20 +559,6 @@ impl Entity {
                 _ => self.insert(key, value),
             };
         }
-    }
-}
-
-impl Deref for Entity {
-    type Target = HashMap<Attribute, Value>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Entity {
-    fn deref_mut(&mut self) -> &mut HashMap<Attribute, Value> {
-        &mut self.0
     }
 }
 
@@ -601,7 +606,7 @@ pub trait ToEntityId {
 
 /// A value that can be converted to an `Entity` key.
 pub trait ToEntityKey {
-    fn to_entity_key(&self, subgraph: SubgraphDeploymentId) -> EntityKey;
+    fn to_entity_key(&self, subgraph: DeploymentHash) -> EntityKey;
 }
 
 #[test]

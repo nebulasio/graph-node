@@ -14,7 +14,7 @@ fn insert_and_query(
     entities: Vec<(Entity, &str)>,
     query: &str,
 ) -> Result<QueryResult, StoreError> {
-    let subgraph_id = SubgraphDeploymentId::new(subgraph_id).unwrap();
+    let subgraph_id = DeploymentHash::new(subgraph_id).unwrap();
     let deployment = create_test_subgraph(&subgraph_id, schema);
 
     let insert_ops = entities
@@ -23,7 +23,7 @@ fn insert_and_query(
             key: EntityKey {
                 subgraph_id: subgraph_id.clone(),
                 entity_type: EntityType::new(entity_type.to_owned()),
-                entity_id: data["id"].clone().as_string().unwrap(),
+                entity_id: data.get("id").unwrap().clone().as_string().unwrap(),
             },
             data,
         });

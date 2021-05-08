@@ -2,8 +2,9 @@ use std::{collections::HashMap, env, sync::Arc};
 
 use config::PoolSize;
 use git_testament::{git_testament, render_testament};
-use graph::prometheus::Registry;
+use graph::{data::graphql::effort::LoadManager, prometheus::Registry};
 use graph_core::MetricsRegistry;
+use graph_graphql::prelude::GraphQlRunner;
 use lazy_static::lazy_static;
 use structopt::StructOpt;
 
@@ -11,14 +12,13 @@ use graph::{
     log::logger,
     prelude::{info, o, slog, tokio, Logger, NodeId},
 };
-use graph_node::config;
-use graph_node::store_builder::StoreBuilder;
+use graph_node::{manager::PanicSubscriptionManager, store_builder::StoreBuilder};
 use graph_store_postgres::{
     connection_pool::ConnectionPool, Shard, Store, SubgraphStore, SubscriptionManager,
     PRIMARY_SHARD,
 };
 
-use crate::config::Config as Cfg;
+use graph_node::config::{self, Config as Cfg};
 use graph_node::manager::commands;
 
 git_testament!(TESTAMENT);
@@ -85,6 +85,9 @@ pub enum Command {
         /// List only pending versions
         #[structopt(long, short)]
         pending: bool,
+        /// Include status information
+        #[structopt(long, short)]
+        status: bool,
         /// List only used (current and pending) versions
         #[structopt(long, short)]
         used: bool,
@@ -97,6 +100,11 @@ pub enum Command {
     /// Remove a named subgraph
     Remove {
         /// The name of the subgraph to remove
+        name: String,
+    },
+    /// Create a subgraph name
+    Create {
+        /// The name of the subgraph to create
         name: String,
     },
     /// Assign or reassign a deployment
@@ -133,6 +141,17 @@ pub enum Command {
     Listen(ListenCommand),
     /// Manage deployment copies and grafts
     Copy(CopyCommand),
+    /// Run a GraphQL query
+    Query {
+        /// The subgraph to query
+        ///
+        /// Either a deployment id `Qm..` or a subgraph name
+        target: String,
+        /// The GraphQL query
+        query: String,
+        /// The variables in the form `key=value`
+        vars: Vec<String>,
+    },
 }
 
 impl Command {
@@ -333,6 +352,23 @@ impl Context {
 
         (store, pools)
     }
+
+    fn graphql_runner(self) -> Arc<GraphQlRunner<Store, PanicSubscriptionManager>> {
+        let logger = self.logger.clone();
+        let registry = self.registry.clone();
+
+        let store = self.store();
+
+        let subscription_manager = Arc::new(PanicSubscriptionManager);
+        let load_manager = Arc::new(LoadManager::new(&logger, vec![], registry, 128));
+
+        Arc::new(GraphQlRunner::new(
+            &logger,
+            store,
+            subscription_manager,
+            load_manager,
+        ))
+    }
 }
 
 #[tokio::main]
@@ -385,8 +421,18 @@ async fn main() {
             name,
             current,
             pending,
+            status,
             used,
-        } => commands::info::run(ctx.primary_pool(), name, current, pending, used),
+        } => {
+            let (pool, store) = if status {
+                let (store, pools) = ctx.store_and_pools();
+                let primary = pools.get(&*PRIMARY_SHARD).expect("there is a primary pool");
+                (primary.clone(), Some(store))
+            } else {
+                (ctx.primary_pool(), None)
+            };
+            commands::info::run(pool, store, name, current, pending, used)
+        }
         Unused(cmd) => {
             let store = ctx.subgraph_store();
             use UnusedCommand::*;
@@ -412,6 +458,7 @@ async fn main() {
             }
         }
         Remove { name } => commands::remove::run(ctx.subgraph_store(), name),
+        Create { name } => commands::create::run(ctx.subgraph_store(), name),
         Unassign { id, shard } => commands::assign::unassign(ctx.subgraph_store(), id, shard),
         Reassign { id, node, shard } => {
             commands::assign::reassign(ctx.subgraph_store(), id, node, shard)
@@ -451,6 +498,11 @@ async fn main() {
                 Status { dst } => commands::copy::status(ctx.pools(), dst),
             }
         }
+        Query {
+            target,
+            query,
+            vars,
+        } => commands::query::run(ctx.graphql_runner(), target, query, vars).await,
     };
     if let Err(e) = result {
         die!("error: {}", e)

@@ -1,7 +1,7 @@
 use super::error::{QueryError, QueryExecutionError};
 use crate::{
     data::graphql::SerializableValue,
-    prelude::{q, CacheWeight, SubgraphDeploymentId},
+    prelude::{q, CacheWeight, DeploymentHash},
 };
 use http::header::{
     ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
@@ -182,7 +182,7 @@ pub struct QueryResult {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     errors: Vec<QueryError>,
     #[serde(skip_serializing)]
-    pub deployment: Option<SubgraphDeploymentId>,
+    pub deployment: Option<DeploymentHash>,
 }
 
 impl QueryResult {
@@ -207,7 +207,7 @@ impl QueryResult {
     }
 
     pub fn has_errors(&self) -> bool {
-        return !self.errors.is_empty();
+        !self.errors.is_empty()
     }
 
     pub fn has_data(&self) -> bool {
@@ -218,7 +218,7 @@ impl QueryResult {
         if self.has_errors() {
             Err(self.errors)
         } else {
-            Ok(self.data.map(|v| q::Value::Object(v)))
+            Ok(self.data.map(q::Value::Object))
         }
     }
 

@@ -1,5 +1,5 @@
 use futures::stream::poll_fn;
-use futures::{Async, Future, Poll, Stream};
+use futures::{Async, Poll, Stream};
 use graphql_parser::schema as s;
 use lazy_static::lazy_static;
 use mockall::predicate::*;
@@ -95,7 +95,7 @@ impl CheapClone for EntityType {}
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EntityKey {
     /// ID of the subgraph.
-    pub subgraph_id: SubgraphDeploymentId,
+    pub subgraph_id: DeploymentHash,
 
     /// Name of the entity type.
     pub entity_type: EntityType,
@@ -117,7 +117,7 @@ impl StableHash for EntityKey {
 }
 
 impl EntityKey {
-    pub fn data(subgraph_id: SubgraphDeploymentId, entity_type: String, entity_id: String) -> Self {
+    pub fn data(subgraph_id: DeploymentHash, entity_type: String, entity_id: String) -> Self {
         Self {
             subgraph_id,
             entity_type: EntityType::new(entity_type),
@@ -137,7 +137,7 @@ fn key_stable_hash() {
         assert_eq!(exp, hash.as_str());
     }
 
-    let id = SubgraphDeploymentId::new("QmP9MRvVzwHxr3sGvujihbvJzcTz2LYLMfi5DyihBg6VUd").unwrap();
+    let id = DeploymentHash::new("QmP9MRvVzwHxr3sGvujihbvJzcTz2LYLMfi5DyihBg6VUd").unwrap();
     let key = EntityKey::data(id.clone(), "Account".to_string(), "0xdeadbeef".to_string());
     hashes_to(
         &key,
@@ -344,7 +344,7 @@ pub const BLOCK_NUMBER_MAX: BlockNumber = std::i32::MAX;
 #[derive(Clone, Debug)]
 pub struct EntityQuery {
     /// ID of the subgraph.
-    pub subgraph_id: SubgraphDeploymentId,
+    pub subgraph_id: DeploymentHash,
 
     /// The block height at which to execute the query. Set this to
     /// `BLOCK_NUMBER_MAX` to run the query at the latest available block.
@@ -376,7 +376,7 @@ pub struct EntityQuery {
 
 impl EntityQuery {
     pub fn new(
-        subgraph_id: SubgraphDeploymentId,
+        subgraph_id: DeploymentHash,
         block: BlockNumber,
         collection: EntityCollection,
     ) -> Self {
@@ -460,7 +460,7 @@ pub enum EntityChangeOperation {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum EntityChange {
     Data {
-        subgraph_id: SubgraphDeploymentId,
+        subgraph_id: DeploymentHash,
         /// Entity type name of the changed entity.
         entity_type: EntityType,
     },
@@ -757,7 +757,7 @@ pub enum StoreError {
         "subgraph `{0}` has already processed block `{1}`; \
          there are most likely two (or more) nodes indexing this subgraph"
     )]
-    DuplicateBlockProcessing(SubgraphDeploymentId, BlockNumber),
+    DuplicateBlockProcessing(DeploymentHash, BlockNumber),
     /// An internal error where we expected the application logic to enforce
     /// some constraint, e.g., that subgraph names are unique, but found that
     /// constraint to not hold
@@ -869,7 +869,7 @@ impl DeploymentId {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct DeploymentLocator {
     pub id: DeploymentId,
-    pub hash: SubgraphDeploymentId,
+    pub hash: DeploymentHash,
 }
 
 impl CheapClone for DeploymentLocator {}
@@ -886,7 +886,7 @@ impl slog::Value for DeploymentLocator {
 }
 
 impl DeploymentLocator {
-    pub fn new(id: DeploymentId, hash: SubgraphDeploymentId) -> Self {
+    pub fn new(id: DeploymentId, hash: DeploymentHash) -> Self {
         Self { id, hash }
     }
 }
@@ -907,7 +907,7 @@ pub trait SubgraphStore: Send + Sync + 'static {
     /// Check if the store is accepting queries for the specified subgraph.
     /// May return true even if the specified subgraph is not currently assigned to an indexing
     /// node, as the store will still accept queries.
-    fn is_deployed(&self, id: &SubgraphDeploymentId) -> Result<bool, Error>;
+    fn is_deployed(&self, id: &DeploymentHash) -> Result<bool, Error>;
 
     /// Create a new deployment for the subgraph `name`. If the deployment
     /// already exists (as identified by the `schema.id`), reuse that, otherwise
@@ -950,11 +950,11 @@ pub trait SubgraphStore: Send + Sync + 'static {
     fn subgraph_exists(&self, name: &SubgraphName) -> Result<bool, StoreError>;
 
     /// Return the GraphQL schema supplied by the user
-    fn input_schema(&self, subgraph_id: &SubgraphDeploymentId) -> Result<Arc<Schema>, StoreError>;
+    fn input_schema(&self, subgraph_id: &DeploymentHash) -> Result<Arc<Schema>, StoreError>;
 
     /// Return the GraphQL schema that was derived from the user's schema by
     /// adding a root query type etc. to it
-    fn api_schema(&self, subgraph_id: &SubgraphDeploymentId) -> Result<Arc<ApiSchema>, StoreError>;
+    fn api_schema(&self, subgraph_id: &DeploymentHash) -> Result<Arc<ApiSchema>, StoreError>;
 
     /// Return a `WritableStore` that is used for indexing subgraphs. Only
     /// code that is part of indexing a subgraph should ever use this.
@@ -969,17 +969,14 @@ pub trait SubgraphStore: Send + Sync + 'static {
     /// `writable` should be used instead
     fn writable_for_network_indexer(
         &self,
-        id: &SubgraphDeploymentId,
+        id: &DeploymentHash,
     ) -> Result<Arc<dyn WritableStore>, StoreError>;
 
     /// Return the minimum block pointer of all deployments with this `id`
     /// that we would use to query or copy from; in particular, this will
     /// ignore any instances of this deployment that are in the process of
     /// being set up
-    fn least_block_ptr(
-        &self,
-        id: &SubgraphDeploymentId,
-    ) -> Result<Option<EthereumBlockPointer>, Error>;
+    fn least_block_ptr(&self, id: &DeploymentHash) -> Result<Option<BlockPtr>, Error>;
 
     /// Find the deployment locators for the subgraph with the given hash
     fn locators(&self, hash: &str) -> Result<Vec<DeploymentLocator>, StoreError>;
@@ -988,7 +985,7 @@ pub trait SubgraphStore: Send + Sync + 'static {
 #[async_trait]
 pub trait WritableStore: Send + Sync + 'static {
     /// Get a pointer to the most recently processed block in the subgraph.
-    fn block_ptr(&self) -> Result<Option<EthereumBlockPointer>, Error>;
+    fn block_ptr(&self) -> Result<Option<BlockPtr>, Error>;
 
     /// Start an existing subgraph deployment.
     fn start_subgraph_deployment(&self, logger: &Logger) -> Result<(), StoreError>;
@@ -997,8 +994,7 @@ pub trait WritableStore: Send + Sync + 'static {
     /// subgraph block pointer to `block_ptr_to`.
     ///
     /// `block_ptr_to` must point to the parent block of the subgraph block pointer.
-    fn revert_block_operations(&self, block_ptr_to: EthereumBlockPointer)
-        -> Result<(), StoreError>;
+    fn revert_block_operations(&self, block_ptr_to: BlockPtr) -> Result<(), StoreError>;
 
     /// Remove the fatal error from a subgraph and check if it is healthy or unhealthy.
     fn unfail(&self) -> Result<(), StoreError>;
@@ -1017,7 +1013,7 @@ pub trait WritableStore: Send + Sync + 'static {
     /// `block_ptr_to` must point to a child block of the current subgraph block pointer.
     fn transact_block_operations(
         &self,
-        block_ptr_to: EthereumBlockPointer,
+        block_ptr_to: BlockPtr,
         mods: Vec<EntityModification>,
         stopwatch: StopwatchMetrics,
         data_sources: Vec<StoredDynamicDataSource>,
@@ -1120,11 +1116,11 @@ impl SubgraphStore for MockStore {
         unimplemented!()
     }
 
-    fn input_schema(&self, _: &SubgraphDeploymentId) -> Result<Arc<Schema>, StoreError> {
+    fn input_schema(&self, _: &DeploymentHash) -> Result<Arc<Schema>, StoreError> {
         unimplemented!()
     }
 
-    fn api_schema(&self, _: &SubgraphDeploymentId) -> Result<Arc<ApiSchema>, StoreError> {
+    fn api_schema(&self, _: &DeploymentHash) -> Result<Arc<ApiSchema>, StoreError> {
         unimplemented!()
     }
 
@@ -1132,20 +1128,17 @@ impl SubgraphStore for MockStore {
         Ok(Arc::new(MockStore::new()))
     }
 
-    fn is_deployed(&self, _: &SubgraphDeploymentId) -> Result<bool, Error> {
+    fn is_deployed(&self, _: &DeploymentHash) -> Result<bool, Error> {
         unimplemented!()
     }
 
-    fn least_block_ptr(
-        &self,
-        _: &SubgraphDeploymentId,
-    ) -> Result<Option<EthereumBlockPointer>, Error> {
+    fn least_block_ptr(&self, _: &DeploymentHash) -> Result<Option<BlockPtr>, Error> {
         unimplemented!()
     }
 
     fn writable_for_network_indexer(
         &self,
-        _: &SubgraphDeploymentId,
+        _: &DeploymentHash,
     ) -> Result<Arc<dyn WritableStore>, StoreError> {
         unimplemented!()
     }
@@ -1158,7 +1151,7 @@ impl SubgraphStore for MockStore {
 // The store trait must be implemented manually because mockall does not support async_trait, nor borrowing from arguments.
 #[async_trait]
 impl WritableStore for MockStore {
-    fn block_ptr(&self) -> Result<Option<EthereumBlockPointer>, Error> {
+    fn block_ptr(&self) -> Result<Option<BlockPtr>, Error> {
         unimplemented!()
     }
 
@@ -1166,7 +1159,7 @@ impl WritableStore for MockStore {
         unimplemented!()
     }
 
-    fn revert_block_operations(&self, _: EthereumBlockPointer) -> Result<(), StoreError> {
+    fn revert_block_operations(&self, _: BlockPtr) -> Result<(), StoreError> {
         unimplemented!()
     }
 
@@ -1188,7 +1181,7 @@ impl WritableStore for MockStore {
 
     fn transact_block_operations(
         &self,
-        _: EthereumBlockPointer,
+        _: BlockPtr,
         _: Vec<EntityModification>,
         _: StopwatchMetrics,
         _: Vec<StoredDynamicDataSource>,
@@ -1238,20 +1231,10 @@ pub trait CallCache: Send + Sync + 'static {
 #[async_trait]
 pub trait ChainStore: Send + Sync + 'static {
     /// Get a pointer to this blockchain's genesis block.
-    fn genesis_block_ptr(&self) -> Result<EthereumBlockPointer, Error>;
+    fn genesis_block_ptr(&self) -> Result<BlockPtr, Error>;
 
-    /// Insert blocks into the store (or update if they are already present).
-    fn upsert_blocks<B, E>(
-        &self,
-        _blocks: B,
-    ) -> Box<dyn Future<Item = (), Error = E> + Send + 'static>
-    where
-        B: Stream<Item = EthereumBlock, Error = E> + Send + 'static,
-        E: From<Error> + Send + 'static,
-        Self: Sized,
-    {
-        unimplemented!()
-    }
+    /// Insert a block into the store (or update if they are already present).
+    async fn upsert_block(&self, block: EthereumBlock) -> Result<(), Error>;
 
     fn upsert_light_blocks(&self, blocks: Vec<LightEthereumBlock>) -> Result<(), Error>;
 
@@ -1271,14 +1254,17 @@ pub trait ChainStore: Send + Sync + 'static {
     ///
     /// If the candidate new head block had one or more missing ancestors, returns
     /// `Ok(missing_blocks)`, where `missing_blocks` is a nonexhaustive list of missing blocks.
-    fn attempt_chain_head_update(&self, ancestor_count: BlockNumber) -> Result<Vec<H256>, Error>;
+    async fn attempt_chain_head_update(
+        self: Arc<Self>,
+        ancestor_count: BlockNumber,
+    ) -> Result<Option<H256>, Error>;
 
     /// Get the current head block pointer for this chain.
     /// Any changes to the head block pointer will be to a block with a larger block number, never
     /// to a block with a smaller or equal block number.
     ///
     /// The head block pointer will be None on initial set up.
-    fn chain_head_ptr(&self) -> Result<Option<EthereumBlockPointer>, Error>;
+    fn chain_head_ptr(&self) -> Result<Option<BlockPtr>, Error>;
 
     /// Returns the blocks present in the store.
     fn blocks(&self, hashes: Vec<H256>) -> Result<Vec<LightEthereumBlock>, Error>;
@@ -1290,7 +1276,7 @@ pub trait ChainStore: Send + Sync + 'static {
     /// Returns an error if the offset would reach past the genesis block.
     fn ancestor_block(
         &self,
-        block_ptr: EthereumBlockPointer,
+        block_ptr: BlockPtr,
         offset: BlockNumber,
     ) -> Result<Option<EthereumBlock>, Error>;
 
@@ -1302,7 +1288,7 @@ pub trait ChainStore: Send + Sync + 'static {
     fn cleanup_cached_blocks(
         &self,
         ancestor_count: BlockNumber,
-    ) -> Result<(BlockNumber, usize), Error>;
+    ) -> Result<Option<(BlockNumber, usize)>, Error>;
 
     /// Return the hashes of all blocks with the given number
     fn block_hashes_by_block_number(&self, number: BlockNumber) -> Result<Vec<H256>, Error>;
@@ -1321,7 +1307,7 @@ pub trait EthereumCallCache: Send + Sync + 'static {
         &self,
         contract_address: ethabi::Address,
         encoded_call: &[u8],
-        block: EthereumBlockPointer,
+        block: BlockPtr,
     ) -> Result<Option<Vec<u8>>, Error>;
 
     // Add entry to the cache.
@@ -1329,7 +1315,7 @@ pub trait EthereumCallCache: Send + Sync + 'static {
         &self,
         contract_address: ethabi::Address,
         encoded_call: &[u8],
-        block: EthereumBlockPointer,
+        block: BlockPtr,
         return_value: &[u8],
     ) -> Result<(), Error>;
 }
@@ -1344,7 +1330,7 @@ pub trait QueryStore: Send + Sync {
 
     fn is_deployment_synced(&self) -> Result<bool, Error>;
 
-    fn block_ptr(&self) -> Result<Option<EthereumBlockPointer>, Error>;
+    fn block_ptr(&self) -> Result<Option<BlockPtr>, Error>;
 
     fn block_number(&self, block_hash: H256) -> Result<Option<BlockNumber>, StoreError>;
 
@@ -1386,9 +1372,9 @@ pub trait StatusStore: Send + Sync + 'static {
     /// can be removed.
     fn get_proof_of_indexing<'a>(
         self: Arc<Self>,
-        subgraph_id: &'a SubgraphDeploymentId,
+        subgraph_id: &'a DeploymentHash,
         indexer: &'a Option<Address>,
-        block: EthereumBlockPointer,
+        block: BlockPtr,
     ) -> DynTryFuture<'a, Option<[u8; 32]>>;
 }
 

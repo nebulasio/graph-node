@@ -1,8 +1,10 @@
 pub mod assign;
 pub mod config;
 pub mod copy;
+pub mod create;
 pub mod info;
 pub mod listen;
+pub mod query;
 pub mod remove;
 pub mod rewind;
 pub mod txn_speed;

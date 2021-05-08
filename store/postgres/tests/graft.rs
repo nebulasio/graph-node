@@ -58,16 +58,15 @@ const USER: &str = "User";
 
 macro_rules! block_pointer {
     ($hash:expr, $number:expr) => {{
-        EthereumBlockPointer::from((H256::from(hex!($hash)), $number as u64))
+        BlockPtr::from((H256::from(hex!($hash)), $number as u64))
     }};
 }
 
 lazy_static! {
-    static ref TEST_SUBGRAPH_ID: SubgraphDeploymentId =
-        SubgraphDeploymentId::new("testsubgraph").unwrap();
+    static ref TEST_SUBGRAPH_ID: DeploymentHash = DeploymentHash::new("testsubgraph").unwrap();
     static ref TEST_SUBGRAPH_SCHEMA: Schema =
         Schema::parse(USER_GQL, TEST_SUBGRAPH_ID.clone()).expect("Failed to parse user schema");
-    static ref BLOCKS: Vec<EthereumBlockPointer> = vec![
+    static ref BLOCKS: Vec<BlockPtr> = vec![
         block_pointer!(
             "bd34884280958002c51d3f7b5f853e6febeba33de0f40d15b0363006533c924f",
             0
@@ -257,12 +256,12 @@ fn remove_test_data(store: Arc<DieselSubgraphStore>) {
 }
 
 fn create_grafted_subgraph(
-    subgraph_id: &SubgraphDeploymentId,
+    subgraph_id: &DeploymentHash,
     schema: &str,
     base_id: &str,
-    base_block: EthereumBlockPointer,
+    base_block: BlockPtr,
 ) -> Result<DeploymentLocator, StoreError> {
-    let base = Some((SubgraphDeploymentId::new(base_id).unwrap(), base_block));
+    let base = Some((DeploymentHash::new(base_id).unwrap(), base_block));
     test_store::create_subgraph(subgraph_id, schema, base)
 }
 
@@ -324,7 +323,7 @@ fn graft() {
     run_test(move |store, _| -> Result<(), StoreError> {
         const SUBGRAPH: &str = "grafted";
 
-        let subgraph_id = SubgraphDeploymentId::new(SUBGRAPH).unwrap();
+        let subgraph_id = DeploymentHash::new(SUBGRAPH).unwrap();
 
         let deployment = create_grafted_subgraph(
             &subgraph_id,

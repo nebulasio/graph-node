@@ -6,7 +6,7 @@ use graph::{
     prelude::{
         anyhow::{anyhow, bail, Error},
         chrono::{DateTime, Duration, SecondsFormat, Utc},
-        ChainStore, EthereumBlockPointer, NodeId, QueryStoreManager,
+        BlockPtr, ChainStore, NodeId, QueryStoreManager,
     },
 };
 use graph_store_postgres::{
@@ -112,7 +112,7 @@ pub async fn create(
             src_number
         ),
     };
-    let base_ptr = EthereumBlockPointer::from((hash, src_number));
+    let base_ptr = BlockPtr::from((hash, src_number));
 
     let shard = Shard::new(shard)?;
     let node = NodeId::new(node.clone()).map_err(|()| anyhow!("invalid node id `{}`", node))?;
@@ -296,6 +296,9 @@ pub fn status(pools: HashMap<Shard, ConnectionPool>, dst: i32) -> Result<(), Err
     for table in tables {
         let status = if table.next_vid > 0 && table.next_vid < table.target_vid {
             ">".to_string()
+        } else if table.target_vid < 0 {
+            // empty source table
+            "✓".to_string()
         } else {
             done(&table.finished_at)
         };

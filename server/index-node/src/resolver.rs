@@ -33,10 +33,10 @@ where
 
     fn resolve_indexing_statuses(
         &self,
-        arguments: &HashMap<&String, q::Value>,
+        arguments: &HashMap<&str, q::Value>,
     ) -> Result<q::Value, QueryExecutionError> {
         let deployments = arguments
-            .get(&String::from("subgraphs"))
+            .get("subgraphs")
             .map(|value| match value {
                 q::Value::List(ids) => ids
                     .into_iter()
@@ -57,7 +57,7 @@ where
 
     fn resolve_indexing_statuses_for_subgraph_name(
         &self,
-        arguments: &HashMap<&String, q::Value>,
+        arguments: &HashMap<&str, q::Value>,
     ) -> Result<q::Value, QueryExecutionError> {
         // Get the subgraph name from the arguments; we can safely use `expect` here
         // because the argument will already have been validated prior to the resolver
@@ -81,10 +81,10 @@ where
 
     fn resolve_proof_of_indexing(
         &self,
-        argument_values: &HashMap<&String, q::Value>,
+        argument_values: &HashMap<&str, q::Value>,
     ) -> Result<q::Value, QueryExecutionError> {
         let deployment_id = argument_values
-            .get_required::<SubgraphDeploymentId>("subgraph")
+            .get_required::<DeploymentHash>("subgraph")
             .expect("Valid subgraphId required");
 
         let block_number: u64 = argument_values
@@ -99,7 +99,7 @@ where
             .try_into()
             .unwrap();
 
-        let block = EthereumBlockPointer::from((block_hash, block_number));
+        let block = BlockPtr::from((block_hash, block_number));
 
         let indexer = argument_values
             .get_optional::<Address>("indexer")
@@ -129,7 +129,7 @@ where
 
     fn resolve_indexing_status_for_version(
         &self,
-        arguments: &HashMap<&String, q::Value>,
+        arguments: &HashMap<&str, q::Value>,
 
         // If `true` return the current version, if `false` return the pending version.
         current_version: bool,
@@ -193,7 +193,7 @@ where
         field: &q::Field,
         scalar_type: &s::ScalarType,
         value: Option<q::Value>,
-        argument_values: &HashMap<&String, q::Value>,
+        argument_values: &HashMap<&str, q::Value>,
     ) -> Result<q::Value, QueryExecutionError> {
         // Check if we are resolving the proofOfIndexing bytes
         if &parent_object_type.name == "Query"
@@ -216,7 +216,7 @@ where
         field: &q::Field,
         _field_definition: &s::Field,
         object_type: ObjectOrInterface<'_>,
-        arguments: &HashMap<&String, q::Value>,
+        arguments: &HashMap<&str, q::Value>,
     ) -> Result<q::Value, QueryExecutionError> {
         match (prefetched_objects, object_type.name(), field.name.as_str()) {
             // The top-level `indexingStatuses` field
@@ -240,7 +240,7 @@ where
         field: &q::Field,
         _field_definition: &s::Field,
         _object_type: ObjectOrInterface<'_>,
-        arguments: &HashMap<&String, q::Value>,
+        arguments: &HashMap<&str, q::Value>,
     ) -> Result<q::Value, QueryExecutionError> {
         match (prefetched_object, field.name.as_str()) {
             // The top-level `indexingStatusForCurrentVersion` field

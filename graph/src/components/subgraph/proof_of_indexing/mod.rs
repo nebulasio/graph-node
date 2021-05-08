@@ -28,7 +28,7 @@ pub type SharedProofOfIndexing = Option<Arc<AtomicRefCell<ProofOfIndexing>>>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::{EthereumBlockPointer, SubgraphDeploymentId, Value};
+    use crate::prelude::{BlockPtr, DeploymentHash, Value};
     use maplit::hashmap;
     use online::ProofOfIndexingFinisher;
     use reference::*;
@@ -75,7 +75,7 @@ mod tests {
         }
 
         let block_number = (block_count - 1) as u64;
-        let block_ptr = EthereumBlockPointer::from((reference.block_hash, block_number));
+        let block_ptr = BlockPtr::from((reference.block_hash, block_number));
 
         // This region emulates the request
         let mut finisher =
@@ -106,7 +106,7 @@ mod tests {
         let mut cases = hashmap! {
             // Simple case of basically nothing
             "genesis" => PoI {
-                subgraph_id: SubgraphDeploymentId::new("test").unwrap(),
+                subgraph_id: DeploymentHash::new("test").unwrap(),
                 block_hash: H256::repeat_byte(1),
                 causality_regions: HashMap::new(),
                 indexer: None,
@@ -114,7 +114,7 @@ mod tests {
 
             // Add an event
             "one_event" => PoI {
-                subgraph_id: SubgraphDeploymentId::new("test").unwrap(),
+                subgraph_id: DeploymentHash::new("test").unwrap(),
                 block_hash: H256::repeat_byte(1),
                 causality_regions: hashmap! {
                     "eth".to_owned() => CausalityRegion {
@@ -137,7 +137,7 @@ mod tests {
 
             // Try adding a couple more blocks, including an empty block on the end
             "multiple_blocks" => PoI {
-                subgraph_id: SubgraphDeploymentId::new("b").unwrap(),
+                subgraph_id: DeploymentHash::new("b").unwrap(),
                 block_hash: H256::repeat_byte(3),
                 causality_regions: hashmap! {
                     "eth".to_owned() => CausalityRegion {
@@ -171,7 +171,7 @@ mod tests {
 
             // Try adding another causality region
             "causality_regions" => PoI {
-                subgraph_id: SubgraphDeploymentId::new("b").unwrap(),
+                subgraph_id: DeploymentHash::new("b").unwrap(),
                 block_hash: H256::repeat_byte(3),
                 causality_regions: hashmap! {
                     "eth".to_owned() => CausalityRegion {
@@ -229,7 +229,7 @@ mod tests {
 
             // Back to the one event case, but try adding some data.
             "data" => PoI {
-                subgraph_id: SubgraphDeploymentId::new("test").unwrap(),
+                subgraph_id: DeploymentHash::new("test").unwrap(),
                 block_hash: H256::repeat_byte(1),
                 causality_regions: hashmap! {
                     "eth".to_owned() => CausalityRegion {

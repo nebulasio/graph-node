@@ -16,7 +16,7 @@ struct BlockWriterMetrics {
 impl BlockWriterMetrics {
     /// Creates new block writer metrics for a given subgraph.
     pub fn new(
-        subgraph_id: &SubgraphDeploymentId,
+        subgraph_id: &DeploymentHash,
         stopwatch: StopwatchMetrics,
         registry: Arc<dyn MetricsRegistry>,
     ) -> Self {
@@ -37,7 +37,7 @@ impl BlockWriterMetrics {
 /// Component that writes Ethereum blocks to the network subgraph store.
 pub struct BlockWriter {
     /// The network subgraph ID (e.g. `ethereum_mainnet_v0`).
-    subgraph_id: SubgraphDeploymentId,
+    subgraph_id: DeploymentHash,
 
     /// Logger.
     logger: Logger,
@@ -52,7 +52,7 @@ pub struct BlockWriter {
 impl BlockWriter {
     /// Creates a new block writer for the given subgraph ID.
     pub fn new(
-        subgraph_id: SubgraphDeploymentId,
+        subgraph_id: DeploymentHash,
         logger: &Logger,
         store: Arc<dyn WritableStore>,
         stopwatch: StopwatchMetrics,
@@ -73,10 +73,7 @@ impl BlockWriter {
     }
 
     /// Writes a block to the store and updates the network subgraph block pointer.
-    pub fn write(
-        &self,
-        block: BlockWithOmmers,
-    ) -> impl Future<Item = EthereumBlockPointer, Error = Error> {
+    pub fn write(&self, block: BlockWithOmmers) -> impl Future<Item = BlockPtr, Error = Error> {
         let logger = self.logger.new(o!(
             "block" => format!("{}", block),
         ));
@@ -96,7 +93,7 @@ impl BlockWriter {
 /// Internal context for writing a block.
 struct WriteContext {
     logger: Logger,
-    subgraph_id: SubgraphDeploymentId,
+    subgraph_id: DeploymentHash,
     store: Arc<dyn WritableStore>,
     cache: EntityCache,
     metrics: Arc<BlockWriterMetrics>,
@@ -120,10 +117,7 @@ impl WriteContext {
     }
 
     /// Writes a block to the store.
-    fn write(
-        self,
-        block: BlockWithOmmers,
-    ) -> impl Future<Item = EthereumBlockPointer, Error = Error> {
+    fn write(self, block: BlockWithOmmers) -> impl Future<Item = BlockPtr, Error = Error> {
         debug!(self.logger, "Write block");
 
         let block = Arc::new(block);
@@ -153,7 +147,7 @@ impl WriteContext {
                     }
                     .modifications;
 
-                    let block_ptr = EthereumBlockPointer::from(&block_for_store.block);
+                    let block_ptr = BlockPtr::from(&block_for_store.block);
 
                     // Transact entity modifications into the store
                     let started = Instant::now();

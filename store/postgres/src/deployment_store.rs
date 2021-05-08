@@ -12,6 +12,7 @@ use graph::prelude::{
 use lru_time_cache::LruCache;
 use rand::{seq::SliceRandom, thread_rng};
 use std::collections::{BTreeMap, HashMap};
+use std::convert::Into;
 use std::convert::TryInto;
 use std::iter::FromIterator;
 use std::ops::Deref;
@@ -22,10 +23,10 @@ use graph::components::store::EntityCollection;
 use graph::components::subgraph::ProofOfIndexingFinisher;
 use graph::data::subgraph::schema::{SubgraphError, POI_OBJECT};
 use graph::prelude::{
-    anyhow, debug, futures03, info, o, web3, ApiSchema, BlockNumber, CheapClone, DeploymentState,
-    DynTryFuture, Entity, EntityKey, EntityModification, EntityQuery, Error, EthereumBlockPointer,
-    Logger, QueryExecutionError, Schema, StopwatchMetrics, StoreError, StoreEvent,
-    SubgraphDeploymentId, Value, BLOCK_NUMBER_MAX,
+    anyhow, debug, futures03, info, o, web3, ApiSchema, BlockNumber, BlockPtr, CheapClone,
+    DeploymentHash, DeploymentState, DynTryFuture, Entity, EntityKey, EntityModification,
+    EntityQuery, Error, Logger, QueryExecutionError, Schema, StopwatchMetrics, StoreError,
+    StoreEvent, Value, BLOCK_NUMBER_MAX,
 };
 
 use graph_graphql::prelude::api_schema;
@@ -79,12 +80,12 @@ pub struct StoreInner {
     conn_round_robin_counter: AtomicUsize,
 
     /// A cache of commonly needed data about a subgraph.
-    subgraph_cache: Mutex<LruCache<SubgraphDeploymentId, SubgraphInfo>>,
+    subgraph_cache: Mutex<LruCache<DeploymentHash, SubgraphInfo>>,
 
     /// A cache for the layout metadata for subgraphs. The Store just
     /// hosts this because it lives long enough, but it is managed from
     /// the entities module
-    pub(crate) layout_cache: Mutex<HashMap<SubgraphDeploymentId, Arc<Layout>>>,
+    pub(crate) layout_cache: Mutex<HashMap<DeploymentHash, Arc<Layout>>>,
 }
 
 /// Storage of the data for individual deployments. Each `DeploymentStore`
@@ -286,7 +287,7 @@ impl DeploymentStore {
         conn: &PgConnection,
         layout: &Layout,
         mods: Vec<EntityModification>,
-        ptr: &EthereumBlockPointer,
+        ptr: &BlockPtr,
         stopwatch: StopwatchMetrics,
     ) -> Result<i32, StoreError> {
         use EntityModification::*;
@@ -348,7 +349,7 @@ impl DeploymentStore {
         data: &mut [(EntityKey, Entity)],
         conn: &PgConnection,
         layout: &Layout,
-        ptr: &EthereumBlockPointer,
+        ptr: &BlockPtr,
         stopwatch: &StopwatchMetrics,
     ) -> Result<usize, StoreError> {
         let section = stopwatch.start_section("check_interface_entity_uniqueness");
@@ -368,7 +369,7 @@ impl DeploymentStore {
         data: &mut [(EntityKey, Entity)],
         conn: &PgConnection,
         layout: &Layout,
-        ptr: &EthereumBlockPointer,
+        ptr: &BlockPtr,
         stopwatch: &StopwatchMetrics,
     ) -> Result<usize, StoreError> {
         let section = stopwatch.start_section("check_interface_entity_uniqueness");
@@ -388,7 +389,7 @@ impl DeploymentStore {
         entity_keys: &[String],
         conn: &PgConnection,
         layout: &Layout,
-        ptr: &EthereumBlockPointer,
+        ptr: &BlockPtr,
         stopwatch: &StopwatchMetrics,
     ) -> Result<usize, StoreError> {
         let _section = stopwatch.start_section("apply_entity_modifications_delete");
@@ -581,9 +582,9 @@ impl DeploymentStore {
     }
 
     fn block_ptr_with_conn(
-        subgraph_id: &SubgraphDeploymentId,
+        subgraph_id: &DeploymentHash,
         conn: &PgConnection,
-    ) -> Result<Option<EthereumBlockPointer>, Error> {
+    ) -> Result<Option<BlockPtr>, Error> {
         Ok(deployment::block_ptr(&conn, subgraph_id)?)
     }
 
@@ -607,13 +608,13 @@ impl DeploymentStore {
 
     pub(crate) fn deployment_exists_and_synced(
         &self,
-        id: &SubgraphDeploymentId,
+        id: &DeploymentHash,
     ) -> Result<bool, StoreError> {
         let conn = self.get_conn()?;
         deployment::exists_and_synced(&conn, id.as_str())
     }
 
-    pub(crate) fn deployment_synced(&self, id: &SubgraphDeploymentId) -> Result<(), StoreError> {
+    pub(crate) fn deployment_synced(&self, id: &DeploymentHash) -> Result<(), StoreError> {
         let conn = self.get_conn()?;
         conn.transaction(|| deployment::set_synced(&conn, id))
     }
@@ -664,7 +665,7 @@ impl DeploymentStore {
 /// Methods that back the trait `graph::components::Store`, but have small
 /// variations in their signatures
 impl DeploymentStore {
-    pub(crate) fn block_ptr(&self, site: &Site) -> Result<Option<EthereumBlockPointer>, Error> {
+    pub(crate) fn block_ptr(&self, site: &Site) -> Result<Option<BlockPtr>, Error> {
         let conn = self.get_conn()?;
         Self::block_ptr_with_conn(&site.deployment, &conn)
     }
@@ -681,7 +682,7 @@ impl DeploymentStore {
                 Ok(layout.supports_proof_of_indexing())
             })
             .await
-            .map_err(|e| e.into())
+            .map_err(Into::into)
         }
         .boxed()
     }
@@ -690,7 +691,7 @@ impl DeploymentStore {
         self: Arc<Self>,
         site: Arc<Site>,
         indexer: &'a Option<Address>,
-        block: EthereumBlockPointer,
+        block: BlockPtr,
     ) -> DynTryFuture<'a, Option<[u8; 32]>> {
         let indexer = indexer.clone();
         let site3 = site.clone();
@@ -740,7 +741,7 @@ impl DeploymentStore {
 
                         Ok(Some(entities))
                     })
-                    .map_err(|e| e.into())
+                    .map_err(Into::into)
                 })
                 .await?;
 
@@ -831,7 +832,7 @@ impl DeploymentStore {
     pub(crate) fn transact_block_operations(
         &self,
         site: Arc<Site>,
-        block_ptr_to: EthereumBlockPointer,
+        block_ptr_to: BlockPtr,
         mods: Vec<EntityModification>,
         stopwatch: StopwatchMetrics,
         data_sources: Vec<StoredDynamicDataSource>,
@@ -908,7 +909,7 @@ impl DeploymentStore {
         &self,
         conn: &PgConnection,
         site: Arc<Site>,
-        block_ptr_to: EthereumBlockPointer,
+        block_ptr_to: BlockPtr,
     ) -> Result<StoreEvent, StoreError> {
         let event = conn.transaction(|| -> Result<_, StoreError> {
             // Don't revert past a graft point
@@ -965,7 +966,7 @@ impl DeploymentStore {
     pub(crate) fn rewind(
         &self,
         site: Arc<Site>,
-        block_ptr_to: EthereumBlockPointer,
+        block_ptr_to: BlockPtr,
     ) -> Result<StoreEvent, StoreError> {
         let conn = self.get_conn()?;
 
@@ -975,7 +976,7 @@ impl DeploymentStore {
     pub(crate) fn revert_block_operations(
         &self,
         site: Arc<Site>,
-        block_ptr_to: EthereumBlockPointer,
+        block_ptr_to: BlockPtr,
     ) -> Result<StoreEvent, StoreError> {
         let conn = self.get_conn()?;
         // Unwrap: If we are reverting then the block ptr is not `None`.
@@ -991,7 +992,7 @@ impl DeploymentStore {
 
     pub(crate) async fn deployment_state_from_id(
         &self,
-        id: SubgraphDeploymentId,
+        id: DeploymentHash,
     ) -> Result<DeploymentState, StoreError> {
         self.with_conn(|conn, _| deployment::state(&conn, id).map_err(|e| e.into()))
             .await
@@ -999,12 +1000,12 @@ impl DeploymentStore {
 
     pub(crate) async fn fail_subgraph(
         &self,
-        id: SubgraphDeploymentId,
+        id: DeploymentHash,
         error: SubgraphError,
     ) -> Result<(), StoreError> {
         self.with_conn(move |conn, _| {
             conn.transaction(|| deployment::fail(&conn, &id, error))
-                .map_err(|e| e.into())
+                .map_err(Into::into)
         })
         .await?;
         Ok(())
@@ -1034,24 +1035,24 @@ impl DeploymentStore {
 
     pub(crate) async fn load_dynamic_data_sources(
         &self,
-        id: SubgraphDeploymentId,
+        id: DeploymentHash,
     ) -> Result<Vec<StoredDynamicDataSource>, StoreError> {
         self.with_conn(move |conn, _| {
             conn.transaction(|| crate::dynds::load(&conn, id.as_str()))
-                .map_err(|e| e.into())
+                .map_err(Into::into)
         })
         .await
     }
 
-    pub(crate) fn exists_and_synced(&self, id: &SubgraphDeploymentId) -> Result<bool, StoreError> {
+    pub(crate) fn exists_and_synced(&self, id: &DeploymentHash) -> Result<bool, StoreError> {
         let conn = self.get_conn()?;
         conn.transaction(|| deployment::exists_and_synced(&conn, id))
     }
 
     pub(crate) fn graft_pending(
         &self,
-        id: &SubgraphDeploymentId,
-    ) -> Result<Option<(SubgraphDeploymentId, EthereumBlockPointer)>, StoreError> {
+        id: &DeploymentHash,
+    ) -> Result<Option<(DeploymentHash, BlockPtr)>, StoreError> {
         let conn = self.get_conn()?;
         deployment::graft_pending(&conn, id)
     }
@@ -1070,14 +1071,12 @@ impl DeploymentStore {
         &self,
         logger: &Logger,
         site: Arc<Site>,
-        graft_src: Option<(Arc<Layout>, EthereumBlockPointer)>,
+        graft_src: Option<(Arc<Layout>, BlockPtr)>,
     ) -> Result<(), StoreError> {
         let dst = self.find_layout(site)?;
 
         // Do any cleanup to bring the subgraph into a known good state
         if let Some((src, block)) = graft_src {
-            let start = Instant::now();
-
             info!(
                 logger,
                 "Initializing graft by copying data from {} to {}",
@@ -1105,11 +1104,13 @@ impl DeploymentStore {
             let conn = self.get_conn()?;
             conn.transaction(|| -> Result<(), StoreError> {
                 // Copy dynamic data sources and adjust their ID
+                let start = Instant::now();
                 let count = dynds::copy(&conn, &src.site, &dst.site, &block)?;
                 info!(logger, "Copied {} dynamic data sources", count;
                       "time_ms" => start.elapsed().as_millis());
 
                 // Copy errors across
+                let start = Instant::now();
                 let count = deployment::copy_errors(&conn, &src.site, &dst.site, &block)?;
                 info!(logger, "Copied {} existing errors", count;
                       "time_ms" => start.elapsed().as_millis());
@@ -1125,6 +1126,11 @@ impl DeploymentStore {
                     .expect("block numbers fit into an i32");
                 dst.revert_block(&conn, &dst.site.deployment, block_to_revert)?;
                 info!(logger, "Rewound subgraph to block {}", block.number;
+                      "time_ms" => start.elapsed().as_millis());
+
+                let start = Instant::now();
+                deployment::set_entity_count(&conn, &dst.site, &dst.count_query)?;
+                info!(logger, "Counted the entities";
                       "time_ms" => start.elapsed().as_millis());
 
                 // Set the block ptr to the graft point to signal that we successfully
@@ -1144,7 +1150,7 @@ impl DeploymentStore {
     }
 
     #[cfg(debug_assertions)]
-    pub fn error_count(&self, id: &SubgraphDeploymentId) -> Result<usize, StoreError> {
+    pub fn error_count(&self, id: &DeploymentHash) -> Result<usize, StoreError> {
         let conn = self.get_conn()?;
         deployment::error_count(&conn, id)
     }

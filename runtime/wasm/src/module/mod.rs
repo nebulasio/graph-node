@@ -83,6 +83,8 @@ impl WasmInstance {
         let value = self.asc_new(value)?;
         let user_data = self.asc_new(user_data)?;
 
+        self.instance_ctx_mut().ctx.state.enter_handler();
+
         // Invoke the callback
         self.instance
             .get_func(handler_name)
@@ -90,6 +92,8 @@ impl WasmInstance {
             .typed()?
             .call((value.wasm_ptr(), user_data.wasm_ptr()))
             .with_context(|| format!("Failed to handle callback '{}'", handler_name))?;
+
+        self.instance_ctx_mut().ctx.state.exit_handler();
 
         Ok(self.take_ctx().ctx.state)
     }
@@ -803,7 +807,7 @@ impl WasmInstanceContext {
                     .host_metrics
                     .stopwatch
                     .start_section("store_get_asc_new");
-                self.asc_new(&entity)?
+                self.asc_new(&entity.sorted())?
             }
             None => AscPtr::null(),
         };
@@ -905,7 +909,12 @@ impl WasmInstanceContext {
         let bytes: Vec<u8> = self.asc_get(bytes_ptr)?;
 
         let result = host_exports::json_from_bytes(&bytes)
-            .with_context(|| format!("Failed to parse JSON from byte array. Bytes: `{:?}`", bytes,))
+            .with_context(|| {
+                format!(
+                    "Failed to parse JSON from byte array. Bytes (truncated to 1024 chars): `{:?}`",
+                    &bytes[..bytes.len().min(1024)],
+                )
+            })
             .map_err(DeterministicHostError)?;
         self.asc_new(&result)
     }
@@ -1346,7 +1355,7 @@ impl WasmInstanceContext {
 
     /// function dataSource.context(): DataSourceContext
     fn data_source_context(&mut self) -> Result<AscPtr<AscEntity>, DeterministicHostError> {
-        self.asc_new(&self.ctx.host_exports.data_source_context())
+        self.asc_new(&self.ctx.host_exports.data_source_context().sorted())
     }
 
     fn ens_name_by_hash(

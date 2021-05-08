@@ -9,8 +9,8 @@ use stable_hash::{SequenceNumber, StableHash, StableHasher};
 use std::str::FromStr;
 use std::{fmt, fmt::Display};
 
-use super::SubgraphDeploymentId;
-use crate::components::{ethereum::EthereumBlockPointer, store::EntityType};
+use super::DeploymentHash;
+use crate::components::{ethereum::BlockPtr, store::EntityType};
 use crate::data::graphql::TryFromValue;
 use crate::data::store::Value;
 use crate::data::subgraph::SubgraphManifest;
@@ -102,10 +102,10 @@ pub struct SubgraphDeploymentEntity {
     pub synced: bool,
     pub fatal_error: Option<SubgraphError>,
     pub non_fatal_errors: Vec<SubgraphError>,
-    pub earliest_block: Option<EthereumBlockPointer>,
-    pub latest_block: Option<EthereumBlockPointer>,
-    pub graft_base: Option<SubgraphDeploymentId>,
-    pub graft_block: Option<EthereumBlockPointer>,
+    pub earliest_block: Option<BlockPtr>,
+    pub latest_block: Option<BlockPtr>,
+    pub graft_base: Option<DeploymentHash>,
+    pub graft_block: Option<BlockPtr>,
     pub reorg_count: i32,
     pub current_reorg_depth: i32,
     pub max_reorg_depth: i32,
@@ -115,7 +115,7 @@ impl SubgraphDeploymentEntity {
     pub fn new(
         source_manifest: &SubgraphManifest,
         synced: bool,
-        earliest_block: Option<EthereumBlockPointer>,
+        earliest_block: Option<BlockPtr>,
     ) -> Self {
         Self {
             manifest: SubgraphManifestEntity::from(source_manifest),
@@ -134,7 +134,7 @@ impl SubgraphDeploymentEntity {
         }
     }
 
-    pub fn graft(mut self, base: Option<(SubgraphDeploymentId, EthereumBlockPointer)>) -> Self {
+    pub fn graft(mut self, base: Option<(DeploymentHash, BlockPtr)>) -> Self {
         if let Some((subgraph, ptr)) = base {
             self.graft_base = Some(subgraph);
             self.graft_block = Some(ptr);
@@ -169,9 +169,9 @@ impl<'a> From<&'a super::SubgraphManifest> for SubgraphManifestEntity {
 
 #[derive(Debug)]
 pub struct SubgraphError {
-    pub subgraph_id: SubgraphDeploymentId,
+    pub subgraph_id: DeploymentHash,
     pub message: String,
-    pub block_ptr: Option<EthereumBlockPointer>,
+    pub block_ptr: Option<BlockPtr>,
     pub handler: Option<String>,
 
     // `true` if we are certain the error is deterministic. If in doubt, this is `false`.

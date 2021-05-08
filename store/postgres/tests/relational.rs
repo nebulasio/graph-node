@@ -2,9 +2,9 @@
 use diesel::connection::SimpleConnection as _;
 use diesel::pg::PgConnection;
 use graph::prelude::{
-    o, slog, web3::types::H256, Entity, EntityCollection, EntityFilter, EntityKey, EntityOrder,
-    EntityQuery, EntityRange, Logger, Schema, StopwatchMetrics, SubgraphDeploymentId, Value,
-    ValueType, BLOCK_NUMBER_MAX,
+    o, slog, web3::types::H256, DeploymentHash, Entity, EntityCollection, EntityFilter, EntityKey,
+    EntityOrder, EntityQuery, EntityRange, Logger, Schema, StopwatchMetrics, Value, ValueType,
+    BLOCK_NUMBER_MAX,
 };
 use graph_mock::MockMetricsRegistry;
 use hex_literal::hex;
@@ -117,8 +117,7 @@ const THINGS_GQL: &str = r#"
 "#;
 
 lazy_static! {
-    static ref THINGS_SUBGRAPH_ID: SubgraphDeploymentId =
-        SubgraphDeploymentId::new("things").unwrap();
+    static ref THINGS_SUBGRAPH_ID: DeploymentHash = DeploymentHash::new("things").unwrap();
     static ref NAMESPACE: Namespace = Namespace::new("sgd0815".to_string()).unwrap();
     static ref LARGE_INT: BigInt = BigInt::from(std::i64::MAX).pow(17);
     static ref LARGE_DECIMAL: BigDecimal =
@@ -423,14 +422,14 @@ macro_rules! assert_entity_eq {
         let (left, right) = (&($left), &($right));
         let mut pass = true;
 
-        for (key, left_value) in left.iter() {
-            match right.get(key) {
+        for (key, left_value) in left.clone().sorted() {
+            match right.get(&key) {
                 None => {
                     pass = false;
                     println!("key '{}' missing from right", key);
                 }
                 Some(right_value) => {
-                    if left_value != right_value {
+                    if left_value != *right_value {
                         pass = false;
                         println!(
                             "values for '{}' differ:\n     left: {:?}\n    right: {:?}",
@@ -440,8 +439,8 @@ macro_rules! assert_entity_eq {
                 }
             }
         }
-        for key in right.keys() {
-            if left.get(key).is_none() {
+        for (key, _) in right.clone().sorted() {
+            if left.get(&key).is_none() {
                 pass = false;
                 println!("key '{}' missing from left", key);
             }
@@ -674,7 +673,7 @@ fn serialize_bigdecimal() {
                 .find(conn, &*SCALAR, "one", BLOCK_NUMBER_MAX)
                 .expect("Failed to read Scalar[one]")
                 .unwrap();
-            assert_entity_eq!(&entity, actual);
+            assert_entity_eq!(entity, actual);
         }
     });
 }

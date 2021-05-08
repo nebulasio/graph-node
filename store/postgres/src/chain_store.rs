@@ -1,6 +1,9 @@
 use graph::{
     constraint_violation,
-    prelude::{async_trait, ethabi, ChainStore as ChainStoreTrait, EthereumCallCache, StoreError},
+    prelude::{
+        async_trait, ethabi, CancelableError, ChainStore as ChainStoreTrait, EthereumCallCache,
+        StoreError,
+    },
 };
 
 use diesel::pg::PgConnection;
@@ -10,12 +13,12 @@ use diesel::sql_types::Text;
 use diesel::{insert_into, update};
 
 use graph::ensure;
-use std::{collections::HashMap, convert::TryFrom};
+use std::{collections::HashMap, convert::TryFrom, sync::Arc};
 use std::{convert::TryInto, iter::FromIterator};
 
 use graph::prelude::{
-    web3::types::H256, BlockNumber, Error, EthereumBlock, EthereumBlockPointer,
-    EthereumNetworkIdentifier, Future, LightEthereumBlock, Stream,
+    web3::types::H256, BlockNumber, BlockPtr, Error, EthereumBlock, EthereumNetworkIdentifier,
+    LightEthereumBlock,
 };
 
 use crate::{
@@ -63,7 +66,7 @@ mod data {
     use std::{convert::TryFrom, io::Write};
 
     use graph::prelude::{
-        serde_json, web3::types::H256, BlockNumber, Error, EthereumBlock, EthereumBlockPointer,
+        serde_json, web3::types::H256, BlockNumber, BlockPtr, Error, EthereumBlock,
         LightEthereumBlock,
     };
 
@@ -360,11 +363,11 @@ mod data {
             conn: &PgConnection,
             chain: &str,
             block: EthereumBlock,
-        ) -> Result<(), Error> {
+        ) -> Result<(), StoreError> {
             let number = block.block.number.unwrap().as_u64() as i64;
             let data = serde_json::to_value(&block).expect("Failed to serialize block");
 
-            let result = match self {
+            match self {
                 Storage::Shared => {
                     use public::ethereum_blocks as b;
 
@@ -383,7 +386,7 @@ mod data {
                         .on_conflict(b::hash)
                         .do_update()
                         .set(values)
-                        .execute(conn)
+                        .execute(conn)?;
                 }
                 Storage::Private(Schema { blocks, .. }) => {
                     let query = format!(
@@ -400,10 +403,10 @@ mod data {
                         .bind::<BigInt, _>(number)
                         .bind::<Bytea, _>(parent_hash.as_bytes())
                         .bind::<Jsonb, _>(data)
-                        .execute(conn)
+                        .execute(conn)?;
                 }
             };
-            result.map(|_| ()).map_err(Error::from)
+            Ok(())
         }
 
         /// Insert a light block. On conflict do nothing, since we
@@ -597,17 +600,15 @@ mod data {
 
         /// Find the first block that is missing from the database needed to
         /// complete the chain from block `hash` to the block with number
-        /// `first_block`. We return the hash of the missing block as an
-        /// array because the remaining code expects that, but the array will only
-        /// ever have at most one element.
-        pub(super) fn missing_parents(
+        /// `first_block`.
+        pub(super) fn missing_parent(
             &self,
             conn: &PgConnection,
             chain: &str,
             first_block: i64,
             hash: H256,
             genesis: H256,
-        ) -> Result<Vec<H256>, Error> {
+        ) -> Result<Option<H256>, Error> {
             match self {
                 Storage::Shared => {
                     // We recursively build a temp table 'chain' containing the hash and
@@ -650,11 +651,14 @@ mod data {
                         .bind::<BigInt, _>(first_block)
                         .load::<BlockHashText>(conn)?;
 
-                    missing
-                        .into_iter()
-                        .map(|parent| parent.hash.parse())
-                        .collect::<Result<_, _>>()
-                        .map_err(Error::from)
+                    let missing = match missing.len() {
+                        0 => None,
+                        1 => Some(missing[0].hash.parse()?),
+                        _ => {
+                            unreachable!("the query can only return no or one row");
+                        }
+                    };
+                    Ok(missing)
                 }
                 Storage::Private(Schema { blocks, .. }) => {
                     // This is the same as `MISSING_PARENT_SQL` above except that
@@ -692,11 +696,14 @@ mod data {
                         .bind::<BigInt, _>(first_block)
                         .load::<BlockHashBytea>(conn)?;
 
-                    missing
-                        .into_iter()
-                        .map(|parent| h256_from_bytes(&parent.hash))
-                        .collect::<Result<_, _>>()
-                        .map_err(Error::from)
+                    let missing = match missing.len() {
+                        0 => None,
+                        1 => Some(h256_from_bytes(&missing[0].hash)?),
+                        _ => {
+                            unreachable!("the query can only return no or one row")
+                        }
+                    };
+                    Ok(missing)
                 }
             }
         }
@@ -709,7 +716,7 @@ mod data {
             &self,
             conn: &PgConnection,
             chain: &str,
-        ) -> Result<Option<EthereumBlockPointer>, Error> {
+        ) -> Result<Option<BlockPtr>, Error> {
             use public::ethereum_networks as n;
 
             let head = n::table
@@ -728,9 +735,7 @@ mod data {
                         .select((b::hash, b::number))
                         .first::<(String, i64)>(conn)
                         .optional()?
-                        .map(|(hash, number)| {
-                            EthereumBlockPointer::try_from((hash.as_str(), number))
-                        })
+                        .map(|(hash, number)| BlockPtr::try_from((hash.as_str(), number)))
                         .transpose()
                 }
                 Storage::Private(Schema { blocks, .. }) => blocks
@@ -740,7 +745,7 @@ mod data {
                     .select((blocks.hash(), blocks.number()))
                     .first::<(Vec<u8>, i64)>(conn)
                     .optional()?
-                    .map(|(hash, number)| EthereumBlockPointer::try_from((hash.as_slice(), number)))
+                    .map(|(hash, number)| BlockPtr::try_from((hash.as_slice(), number)))
                     .transpose(),
             }
         }
@@ -748,7 +753,7 @@ mod data {
         pub(super) fn ancestor_block(
             &self,
             conn: &PgConnection,
-            block_ptr: EthereumBlockPointer,
+            block_ptr: BlockPtr,
             offset: BlockNumber,
         ) -> Result<Option<EthereumBlock>, Error> {
             let data = match self {
@@ -1054,10 +1059,10 @@ mod data {
 }
 
 pub struct ChainStore {
-    conn: ConnectionPool,
+    pool: ConnectionPool,
     pub chain: String,
     storage: data::Storage,
-    genesis_block_ptr: EthereumBlockPointer,
+    genesis_block_ptr: BlockPtr,
     status: ChainStatus,
     chain_head_update_sender: ChainHeadUpdateSender,
 }
@@ -1072,7 +1077,7 @@ impl ChainStore {
         pool: ConnectionPool,
     ) -> Self {
         let store = ChainStore {
-            conn: pool,
+            pool,
             chain,
             storage,
             genesis_block_ptr: (net_identifier.genesis_block_hash, 0 as u64).into(),
@@ -1088,7 +1093,7 @@ impl ChainStore {
     }
 
     fn get_conn(&self) -> Result<PooledConnection<ConnectionManager<PgConnection>>, Error> {
-        self.conn.get().map_err(Error::from)
+        self.pool.get().map_err(Error::from)
     }
 
     pub(crate) fn create(&self, ident: &EthereumNetworkIdentifier) -> Result<(), Error> {
@@ -1114,10 +1119,10 @@ impl ChainStore {
         Ok(())
     }
 
-    pub fn chain_head_pointers(&self) -> Result<HashMap<String, EthereumBlockPointer>, StoreError> {
+    pub fn chain_head_pointers(&self) -> Result<HashMap<String, BlockPtr>, StoreError> {
         use public::ethereum_networks as n;
 
-        let pointers: Vec<(String, EthereumBlockPointer)> = n::table
+        let pointers: Vec<(String, BlockPtr)> = n::table
             .select((n::name, n::head_block_hash, n::head_block_number))
             .load::<(String, Option<String>, Option<i64>)>(&self.get_conn()?)?
             .into_iter()
@@ -1126,7 +1131,7 @@ impl ChainStore {
                 _ => None,
             })
             .map(|(name, hash, number)| {
-                EthereumBlockPointer::try_from((hash.as_str(), number)).map(|ptr| (name, ptr))
+                BlockPtr::try_from((hash.as_str(), number)).map(|ptr| (name, ptr))
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(HashMap::from_iter(pointers))
@@ -1157,71 +1162,87 @@ impl ChainStore {
 
 #[async_trait]
 impl ChainStoreTrait for ChainStore {
-    fn genesis_block_ptr(&self) -> Result<EthereumBlockPointer, Error> {
+    fn genesis_block_ptr(&self) -> Result<BlockPtr, Error> {
         Ok(self.genesis_block_ptr.clone())
     }
 
-    fn upsert_blocks<B, E>(
-        &self,
-        blocks: B,
-    ) -> Box<dyn Future<Item = (), Error = E> + Send + 'static>
-    where
-        B: Stream<Item = EthereumBlock, Error = E> + Send + 'static,
-        E: From<Error> + Send + 'static,
-    {
-        let conn = self.conn.clone();
+    async fn upsert_block(&self, block: EthereumBlock) -> Result<(), Error> {
+        let pool = self.pool.clone();
         let network = self.chain.clone();
         let storage = self.storage.clone();
-        Box::new(blocks.for_each(move |block| {
-            let conn = conn.get().map_err(Error::from)?;
-            storage
-                .upsert_block(&conn, &network, block)
-                .map_err(E::from)
-        }))
+        pool.with_conn(move |conn, _| {
+            conn.transaction(|| {
+                storage
+                    .upsert_block(&conn, &network, block)
+                    .map_err(CancelableError::from)
+            })
+        })
+        .await
+        .map_err(Error::from)
     }
 
     fn upsert_light_blocks(&self, blocks: Vec<LightEthereumBlock>) -> Result<(), Error> {
-        let conn = self.conn.get()?;
+        let conn = self.pool.get()?;
         for block in blocks {
             self.storage.upsert_light_block(&conn, &self.chain, block)?;
         }
         Ok(())
     }
 
-    fn attempt_chain_head_update(&self, ancestor_count: BlockNumber) -> Result<Vec<H256>, Error> {
+    async fn attempt_chain_head_update(
+        self: Arc<Self>,
+        ancestor_count: BlockNumber,
+    ) -> Result<Option<H256>, Error> {
         use public::ethereum_networks as n;
 
         let (missing, ptr) = {
-            let conn = self.get_conn()?;
-            conn.transaction(|| -> Result<(Vec<H256>, Option<(String, i64)>), Error> {
-                let candidate = self.storage.chain_head_candidate(&conn, &self.chain)?;
-                let (ptr, first_block) = match &candidate {
-                    None => return Ok((vec![], None)),
-                    Some(ptr) => (ptr, 0.max(ptr.number.saturating_sub(ancestor_count))),
-                };
+            let chain_store = self.clone();
+            self.pool
+                .with_conn(move |conn, _| {
+                    let candidate = chain_store
+                        .storage
+                        .chain_head_candidate(&conn, &chain_store.chain)
+                        .map_err(CancelableError::from)?;
+                    let (ptr, first_block) = match &candidate {
+                        None => return Ok((None, None)),
+                        Some(ptr) => (ptr, 0.max(ptr.number.saturating_sub(ancestor_count))),
+                    };
 
-                let missing = self.storage.missing_parents(
-                    &conn,
-                    &self.chain,
-                    first_block as i64,
-                    ptr.hash_as_h256(),
-                    self.genesis_block_ptr.hash_as_h256(),
-                )?;
-                if !missing.is_empty() {
-                    return Ok((missing, None));
-                }
+                    match chain_store
+                        .storage
+                        .missing_parent(
+                            &conn,
+                            &chain_store.chain,
+                            first_block as i64,
+                            ptr.hash_as_h256(),
+                            chain_store.genesis_block_ptr.hash_as_h256(),
+                        )
+                        .map_err(CancelableError::from)?
+                    {
+                        Some(missing) => {
+                            return Ok((Some(missing), None));
+                        }
+                        None => { /* we have a complete chain, no missing parents */ }
+                    }
 
-                let hash = ptr.hash_hex();
-                let number = ptr.number as i64;
-                update(n::table.filter(n::name.eq(&self.chain)))
-                    .set((
-                        n::head_block_hash.eq(&hash),
-                        n::head_block_number.eq(number),
-                    ))
-                    .execute(&conn)?;
-                Ok((missing, Some((hash, number))))
-            })
-        }?;
+                    let hash = ptr.hash_hex();
+                    let number = ptr.number as i64;
+
+                    conn.transaction(
+                        || -> Result<(Option<H256>, Option<(String, i64)>), StoreError> {
+                            update(n::table.filter(n::name.eq(&chain_store.chain)))
+                                .set((
+                                    n::head_block_hash.eq(&hash),
+                                    n::head_block_number.eq(number),
+                                ))
+                                .execute(conn)?;
+                            Ok((None, Some((hash, number))))
+                        },
+                    )
+                    .map_err(CancelableError::from)
+                })
+                .await?
+        };
         if let Some((hash, number)) = ptr {
             self.chain_head_update_sender.send(&hash, number)?;
         }
@@ -1229,7 +1250,7 @@ impl ChainStoreTrait for ChainStore {
         Ok(missing)
     }
 
-    fn chain_head_ptr(&self) -> Result<Option<EthereumBlockPointer>, Error> {
+    fn chain_head_ptr(&self) -> Result<Option<BlockPtr>, Error> {
         use public::ethereum_networks::dsl::*;
 
         ethereum_networks
@@ -1255,7 +1276,7 @@ impl ChainStoreTrait for ChainStore {
 
     fn ancestor_block(
         &self,
-        block_ptr: EthereumBlockPointer,
+        block_ptr: BlockPtr,
         offset: BlockNumber,
     ) -> Result<Option<EthereumBlock>, Error> {
         ensure!(
@@ -1272,7 +1293,7 @@ impl ChainStoreTrait for ChainStore {
     fn cleanup_cached_blocks(
         &self,
         ancestor_count: BlockNumber,
-    ) -> Result<(BlockNumber, usize), Error> {
+    ) -> Result<Option<(BlockNumber, usize)>, Error> {
         use diesel::sql_types::Integer;
 
         #[derive(QueryableByName)]
@@ -1328,12 +1349,12 @@ impl ChainStoreTrait for ChainStore {
                 if *block > 0 {
                     self.storage
                         .delete_blocks_before(&conn, &self.chain, *block as i64)
-                        .map(|rows| (*block, rows))
+                        .map(|rows| Some((*block, rows)))
                 } else {
-                    Ok((0, 0))
+                    Ok(None)
                 }
             })
-            .unwrap_or(Ok((0, 0)))
+            .unwrap_or(Ok(None))
             .map_err(|e| e.into())
     }
 
@@ -1363,7 +1384,7 @@ impl EthereumCallCache for ChainStore {
         &self,
         contract_address: ethabi::Address,
         encoded_call: &[u8],
-        block: EthereumBlockPointer,
+        block: BlockPtr,
     ) -> Result<Option<Vec<u8>>, Error> {
         let id = contract_call_id(&contract_address, encoded_call, &block);
         let conn = &*self.get_conn()?;
@@ -1390,7 +1411,7 @@ impl EthereumCallCache for ChainStore {
         &self,
         contract_address: ethabi::Address,
         encoded_call: &[u8],
-        block: EthereumBlockPointer,
+        block: BlockPtr,
         return_value: &[u8],
     ) -> Result<(), Error> {
         let id = contract_call_id(&contract_address, encoded_call, &block);
@@ -1413,7 +1434,7 @@ impl EthereumCallCache for ChainStore {
 fn contract_call_id(
     contract_address: &ethabi::Address,
     encoded_call: &[u8],
-    block: &EthereumBlockPointer,
+    block: &BlockPtr,
 ) -> [u8; 32] {
     let mut hash = blake3::Hasher::new();
     hash.update(encoded_call);
@@ -1427,7 +1448,7 @@ fn contract_call_id(
 pub mod test_support {
     use std::str::FromStr;
 
-    use graph::prelude::{web3::types::H256, BlockNumber, EthereumBlock, EthereumBlockPointer};
+    use graph::prelude::{web3::types::H256, BlockNumber, BlockPtr, EthereumBlock};
 
     // Hash indicating 'no parent'
     pub const NO_PARENT: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -1461,8 +1482,8 @@ pub mod test_support {
             H256::from_str(self.hash.as_str()).expect("invalid block hash")
         }
 
-        pub fn block_ptr(&self) -> EthereumBlockPointer {
-            EthereumBlockPointer::from((self.block_hash(), self.number))
+        pub fn block_ptr(&self) -> BlockPtr {
+            BlockPtr::from((self.block_hash(), self.number))
         }
 
         pub fn as_ethereum_block(&self) -> EthereumBlock {
@@ -1491,7 +1512,7 @@ pub mod test_support {
 #[cfg(debug_assertions)]
 impl test_support::SettableChainStore for ChainStore {
     fn set_chain(&self, genesis_hash: &str, chain: test_support::Chain) {
-        let conn = self.conn.get().expect("can get a database connection");
+        let conn = self.pool.get().expect("can get a database connection");
 
         self.storage
             .set_chain(&conn, &self.chain, genesis_hash, chain);
